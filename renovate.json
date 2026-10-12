@@ -1,20 +1,40 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": ["config:recommended", "helpers:pinGitHubActionDigests"],
+  "extends": [
+    "config:recommended",
+    "helpers:pinGitHubActionDigests"
+  ],
   "forkProcessing": "enabled",
   "timezone": "Europe/London",
-  "schedule": ["before 9am on Monday"],
-  "labels": ["dependencies"],
+  "labels": [
+    "dependencies"
+  ],
   "packageRules": [
     {
       "description": "Group all LinuxServer.io image updates",
-      "matchDatasources": ["docker"],
-      "matchPackagePatterns": ["^lscr\\.io/linuxserver/"],
+      "matchDatasources": [
+        "docker"
+      ],
+      "matchPackageNames": [
+        "/^lscr\\.io/linuxserver//"
+      ],
       "groupName": "LinuxServer.io images"
     },
     {
+      "description": "qBittorrent's registry still carries 20.04.x tags from old Ubuntu-based builds; they sort above 5.x but are years older",
+      "matchDatasources": [
+        "docker"
+      ],
+      "matchPackageNames": [
+        "lscr.io/linuxserver/qbittorrent"
+      ],
+      "allowedVersions": "<20"
+    },
+    {
       "description": "Group infrastructure images (Gluetun, Traefik, Cloudflared, Pi-hole)",
-      "matchDatasources": ["docker"],
+      "matchDatasources": [
+        "docker"
+      ],
       "matchPackageNames": [
         "qmcgaw/gluetun",
         "traefik",
@@ -25,7 +45,9 @@
     },
     {
       "description": "Group monitoring/utility images",
-      "matchDatasources": ["docker"],
+      "matchDatasources": [
+        "docker"
+      ],
       "matchPackageNames": [
         "henrygd/beszel",
         "henrygd/beszel-agent",

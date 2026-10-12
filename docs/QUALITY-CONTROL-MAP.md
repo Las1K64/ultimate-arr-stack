@@ -11,7 +11,7 @@ For each part of the stack: which check covers it, where that check runs, whethe
 | **CI required** | `bats suite` (the same bats run), `lint (actionlint, hadolint, shellcheck warnings)`, `supply chain (trivy, sbom)` | PR to `main`, push to `main`, manual dispatch | branch protection won't merge the PR |
 | **CI nightly** | `nightly — trivy over every compose image`, `nightly — the devcontainer builds` | daily 03:23 UTC, and manual dispatch | a red run; never gates anything |
 | **e2e** | `npm run test:e2e`: Playwright specs in `tests/e2e/` against the live stack | by hand, with `.env.e2e` | a red run that only you see |
-| **Renovate** | `renovate.json` | before 9am Monday (Europe/London), if the Renovate app is installed | opens a PR whose body says to test on the NAS first |
+| **Renovate** | `renovate.json` | whenever the hosted Renovate app runs on the repository (no schedule window) | opens a PR whose body says to test on the NAS first |
 | **NAS** | by hand: the rule in [CLAUDE.md](../CLAUDE.md#deploying-to-the-nas) and the [pre-release checklist](../CONTRIBUTING.md#pre-release-checklist). By cron, if you install it: `check-vpn.sh` feeding a Kuma push monitor ([UTILITIES.md](UTILITIES.md#the-vpn-check-and-why-it-is-a-push-monitor)) | every change, before `main` | the branch shouldn't merge. Nothing enforces that |
 
 ## Capability map
@@ -110,7 +110,7 @@ For each part of the stack: which check covers it, where that check runs, whethe
 - The killswitch test skips unless `ALLOW_DISRUPTIVE_TESTS=1`, because it stops the live gluetun.
 
 **Renovate**
-- `renovate.json` does nothing unless the Renovate app is installed on the repository.
+- `renovate.json` does nothing unless the Renovate app is installed on the repository. It is installed here: its Dependency Dashboard issue lists what it sees.
 
 ## Gaps
 
@@ -125,7 +125,7 @@ Things nothing checks, or checks that can't see what they're meant to. Each was 
 - **Image CVEs never gate or notify.** The nightly findings sit in the run summary and the `trivy-images` artifact.
 - **Tag existence is checked only when a PR or push runs bats.** A tag pulled upstream between changes surfaces at the next change, or at the next `docker compose pull`.
 - **A minor-only tag passes the pinning checks** (`traefik:v3.7`) though it moves with each patch release, and compose images aren't pinned by digest.
-- **Update discovery rests on hook check 10.** This repository has no Renovate PR, branch or Dependency Dashboard issue, so nothing shows the app is installed. Nothing reports new versions of the digest-pinned CI tool images in `ci.yml`.
+- **Update discovery rests on Renovate, backed by hook check 10.** The hosted app runs when it gets round to it, not at a set time: with a "before 9am Monday" schedule, the first Monday (12 October 2026) passed with eight bumps queued and no PR opened, so the window was dropped. Nothing reports new versions of the digest-pinned CI tool images in `ci.yml`.
 - **YAML outside the compose files is parsed only by the hook, and only when staged.** The `*.yml.example` templates and `renovate.json` are never validated, and the YAML check has no negative test.
 - **Some code is never type-checked or linted.** Playwright strips the e2e specs' types without checking them, and CI never loads the specs at all. The `*.bats` files and the two Python helpers aren't linted.
 - **Untested scripts** (shellcheck at `error` only): `check-network.sh`, `fix-radarr-paths.sh`, `fix-sonarr-folders.sh`, `restart-stack.sh`, `scan-executables.sh`. Hook checks 3, 6, 7 and 9 have no tests either.

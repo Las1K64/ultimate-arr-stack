@@ -2,6 +2,30 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.16.0] - 2026-10-12
+
+Alerts that actually arrive, one Home Assistant automation for all of them, consistent database backups, eight image bumps, and the UGOS updater that was quietly deleting VPN-side containers every Monday.
+
+### Changed
+- **Eight image bumps.** jellyfin `12.1`→`12.2`, qbittorrent `5.2.3`→`5.2.4`, cloudflared `2026.9.3`→`2026.10.0`, docker `29.8-cli`→`29.9-cli` (gluetun-recover), uptime-kuma `2.5.5`→`2.5.6`, beszel and beszel-agent `0.20`→`0.21`, configarr `1.32.0`→`1.34.1`. Config volumes were backed up with each service stopped, and a snapshot taken before each bump was compared afterwards. Jellyfin's libraries, item counts, plugins and `encoding.xml`, qBittorrent's preferences and categories, and Kuma's and Beszel's monitors, notifications and alerts all came out identical.
+  - **Jellyfin 12.2 runs four one-way migrations** (`Startup complete` in 15 s here). One of them rewrites `encoding.xml` when `EncoderPreset` is empty; a valid preset is left alone. It also streams Dolby Vision profile 8 as `hvc1` instead of `dvh1`.
+  - **Beszel 0.21 adds two fields to its database**, so 0.20 can't read it afterwards.
+  - **qBittorrent 5.2.4's new "add torrent" dialog can fail on very large torrents added by hand** in the web UI ([qBittorrent#24989](https://github.com/qbittorrent/qBittorrent/issues/24989)). Sonarr and Radarr add through the API and are unaffected.
+- **One Home Assistant automation on one LAN-only webhook takes every notification**: Sonarr and Radarr, Uptime Kuma, Beszel, the backup and the queue cleanup. It ships as `docs/HOME-ASSISTANT-notifications.yaml`. Every notice says what happened and what to do; `info` goes to the panel, `warning` and `critical` also push to the phone. The scripts' alerts carry a level: a failed backup is `critical`, the weekly queue report `info`.
+- **Uptime Kuma alerts go through that webhook.** The docs had Kuma use its *Home Assistant* notification type, which calls `notify.notify` directly and on a typical install reaches no phone. Kuma now posts a custom JSON body: a monitor going down pushes, coming back up replaces it in the panel. A monitor's description is added to its down message; the VPN Check monitor's says where its failures are logged.
+- **DIUN is opt-in** (`--profile diun`). Renovate opens a PR for each new image tag, which is the thing to act on, so DIUN only repeated it. Its "rebuilt upstream" notice also fired for tags you don't run, because its payload doesn't say which tag a container uses; that wording now says so.
+- **Renovate opens its PRs whenever it runs.** Its "before 9am Monday" window passed with eight bumps queued and no PR, because the hosted app didn't run in it. Its config is migrated to current syntax, and qBittorrent's `20.04.x` tags from old Ubuntu builds, which sort above 5.x, are ignored.
+- **The nightly backup now includes the Sonarr, Radarr and Jellyfin databases**, consistently. Sonarr and Radarr are backed up through their own Backup API; Jellyfin's database is copied with SQLite's online backup API from a read-only mount. Every copy must pass `integrity_check`. A failed volume no longer ends in exit 0: the rest is archived, then the script exits 1.
+- **Seerr and Bazarr no longer depend on gluetun.** Neither talks to anything behind the VPN, and the dependency meant an `up -d seerr` also processed gluetun, recreating it if it had drifted.
+- **The weekly queue sweep leaves downloads "matched by ID"** for a manual import instead of blocklisting and deleting them, and names them in its report.
+
+### Fixed
+- **UGOS's Docker image updater deleted VPN-side containers.** Every Monday at 04:00 it removes a container whose tag was re-pushed upstream and recreates it from its saved settings. That always fails for containers in gluetun's network namespace, after the old one is gone. Prowlarr, qBittorrent and SABnzbd disappeared this way for two hours at a time until the 06:00 backup's safety net ran `compose up` for them. Turn the updater off (see `docs/SETUP.md`; `docs/UPGRADING.md` used to recommend it). The safety net now covers every arr-stack service, flaresolverr, seerr and bazarr included, and a bats test keeps its list in step with the compose file.
+- **Backup failures and queue reports were never sent.** Both scripts read `HA_WEBHOOK_URL` only from the environment, which cron doesn't set; they now read it from `.env`.
+- **DIUN's webhook arrived with an empty body**: it sent no `Content-Type`, so Home Assistant didn't parse it. The DIUN docs also read a field DIUN never sends.
+- **The port/IP conflict check saw 3 of 18 published ports.** It grepped the YAML; it now reads each file's rendered compose model.
+- **Hook check 8 relied on the NAS's `grep -P`** and reported OK when `pihole.toml` couldn't be read. It now parses both DNS files locally and also flags a name defined twice.
+
 ## [1.15.0] - 2026-09-28
 
 One licence for the whole repository, and the fixes found on the way.

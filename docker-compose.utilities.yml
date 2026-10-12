@@ -279,6 +279,10 @@ services:
   # ═══════════════════════════════════════════════════════════════════════════
   diun:
     image: crazymax/diun:4.33.0
+    # Opt-in: Renovate already turns each new tag into a PR, which is the thing
+    # to act on, so with Renovate on your fork DIUN only repeats it. Without
+    # Renovate, start it with --profile diun.
+    profiles: ["diun"]
     container_name: diun
     <<: *default-security
     cap_add:
