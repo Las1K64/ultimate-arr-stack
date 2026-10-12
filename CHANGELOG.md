@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.16.1] - 2026-10-12
+
+DIUN is gone.
+
+### Removed
+- **DIUN.** 1.16.0 made it opt-in, but there is no reason to opt in. New image versions reach you as tag bumps in this repo: Renovate opens a PR for each, and a release ships them. A DIUN notice could only report a version the repo hadn't adopted yet or, for "rebuilt upstream", a tag that may not be the one you run. The service, its volume, its `.env` variables and the DIUN branch of the Home Assistant automation are gone, and 172.20.0.16 is free. `docs/UPGRADING.md` says what to remove from a running install.
+
 ## [1.16.0] - 2026-10-12
 
 Alerts that actually arrive, one Home Assistant automation for all of them, consistent database backups, eight image bumps, and the UGOS updater that was quietly deleting VPN-side containers every Monday.

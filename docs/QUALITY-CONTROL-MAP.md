@@ -131,7 +131,7 @@ Things nothing checks, or checks that can't see what they're meant to. Each was 
 - **Untested scripts** (shellcheck at `error` only): `check-network.sh`, `fix-radarr-paths.sh`, `fix-sonarr-folders.sh`, `restart-stack.sh`, `scan-executables.sh`. Hook checks 3, 6, 7 and 9 have no tests either.
 - **The three executable-extension lists** in `configure-apps.sh`, `scan-executables.sh` and `media-hygiene.spec.ts` must match, and nothing compares them.
 - **Backups:** a volume that fails to copy prints an error (and posts to `HA_WEBHOOK_URL` if set), but the script still exits 0, and no test covers that path. The volume list is hard-coded and never compared with the compose files. Nothing checks that the scheduled backup ran.
-- **No live test for** cloudflared, Tailscale, dnscrypt-proxy, diun, deunhealth or configarr. The utilities get only their optional `.lan` routes, and the tunnel only hook check 9's two external names.
+- **No live test for** cloudflared, Tailscale, dnscrypt-proxy, deunhealth or configarr. The utilities get only their optional `.lan` routes, and the tunnel only hook check 9's two external names.
 - **The neighbouring project's static IP on `arr-stack`** lives outside this repo. Only `docker network inspect` on the NAS shows it.
 
 ## Keeping this page true

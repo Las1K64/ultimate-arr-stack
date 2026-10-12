@@ -12,8 +12,8 @@
 # in docker-compose.arr-stack.yml — see the long comment there. Short version:
 # without `name:`, the physical volume is named after the deploy directory,
 # so renaming that directory silently swaps in empty volumes rather than
-# failing. These carry the Uptime Kuma history, Beszel metrics and diun's
-# seen-tags DB, all of which are annoying to lose and easy to lose silently.
+# failing. These carry the Uptime Kuma history and Beszel metrics, both of
+# which are annoying to lose and easy to lose silently.
 # One project with docker-compose.arr-stack.yml — see the note there.
 name: arr-stack
 
@@ -24,8 +24,6 @@ volumes:
     name: arr-stack_uptime-kuma-data
   beszel-data:
     name: arr-stack_beszel-data
-  diun-data:
-    name: arr-stack_diun-data
   configarr-repos:
     name: arr-stack_configarr-repos
 
@@ -271,61 +269,6 @@ services:
       timeout: 10s
       retries: 3
       start_period: 10s
-
-  # ═══════════════════════════════════════════════════════════════════════════
-  # DIUN - Docker Image Update Notifier. Watches running containers and sends
-  # webhook notifications when newer image versions are available on registries.
-  # No web UI. Configure DIUN_WEBHOOK_URL in .env to receive alerts.
-  # ═══════════════════════════════════════════════════════════════════════════
-  diun:
-    image: crazymax/diun:4.33.0
-    # Opt-in: Renovate already turns each new tag into a PR, which is the thing
-    # to act on, so with Renovate on your fork DIUN only repeats it. Without
-    # Renovate, start it with --profile diun.
-    profiles: ["diun"]
-    container_name: diun
-    <<: *default-security
-    cap_add:
-      - CHOWN           # Create data dirs on first run
-      - DAC_OVERRIDE    # Write to root-owned volume directories
-    restart: always
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-      - diun-data:/data
-    networks:
-      arr-stack:
-        ipv4_address: 172.20.0.16
-    environment:
-      - TZ=${TZ}
-      - DIUN_WATCH_WORKERS=5
-      - DIUN_WATCH_SCHEDULE=${DIUN_SCHEDULE:-0 6 * * *}
-      - DIUN_PROVIDERS_DOCKER=true
-      - DIUN_PROVIDERS_DOCKER_WATCHBYDEFAULT=true
-      # Watch the whole repo, not just the pinned tag: without WATCHREPO diun
-      # only reports digest changes of e.g. :v3.3.0 itself, so a new v3.4.1
-      # release never triggers a notification (this is how the Seerr v3.4.x
-      # releases went unnoticed). INCLUDETAGS limits the scan to plain semver
-      # tags so nightlies/betas/rc tags stay silent. $$ = literal $ (compose
-      # interpolation escape). SORTTAGS+MAXTAGS cap each scan at the 25 highest
-      # semver tags per repo — without the cap diun fetches manifests for EVERY
-      # matching tag of all ~24 repos daily (registry rate-limit bait).
-      #
-      # NOTE: diun's "first check" (which suppresses notifications) is tracked
-      # per REPO, not per tag — enabling WATCHREPO against an existing /data
-      # DB notifies for every historical tag it hasn't seen (hundreds). When
-      # turning this on, move the old DB aside first so the first scan primes
-      # silently:  mv /data/diun.db /data/diun.db.pre-watchrepo  (then restart)
-      - DIUN_DEFAULTS_WATCHREPO=true
-      - DIUN_DEFAULTS_INCLUDETAGS=^v?\d+\.\d+\.\d+$$
-      - DIUN_DEFAULTS_SORTTAGS=semver
-      - DIUN_DEFAULTS_MAXTAGS=25
-      - DIUN_NOTIF_WEBHOOK_ENDPOINT=${DIUN_WEBHOOK_URL}
-      - DIUN_NOTIF_WEBHOOK_METHOD=POST
-      # Home Assistant only parses a webhook body as JSON when the request says
-      # so. DIUN takes headers as HEADERS_<NAME>=<value>; the numbered _0_NAME/
-      # _0_VALUE form this used to have was ignored, so notices arrived empty.
-      - DIUN_NOTIF_WEBHOOK_HEADERS_CONTENT-TYPE=application/json
-    logging: *default-logging
 
   # ═══════════════════════════════════════════════════════════════════════════
   # CONFIGARR - Syncs TRaSH Guides quality profiles and custom formats to

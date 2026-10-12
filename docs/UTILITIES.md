@@ -15,7 +15,6 @@ docker compose -f docker-compose.utilities.yml up -d
 | **Uptime Kuma** | Service monitoring dashboard | http://uptime.lan |
 | **Beszel** | System metrics (CPU, RAM, disk, containers) | http://beszel.lan |
 | **duc** | Disk usage analyzer (treemap UI) | http://duc.lan |
-| **DIUN** | Opt-in (`--profile diun`). Webhook notification when a newer image tag is published. Skip it if Renovate runs on your fork, which opens a PR for each one (see [Home Assistant](HOME-ASSISTANT.md#step-2-point-every-sender-at-it)) | Internal |
 | **Configarr** | Syncs TRaSH Guides quality profiles to Sonarr/Radarr | Run manually |
 
 > **Want Docker log viewing?** [Dozzle](https://dozzle.dev/) is a lightweight web UI for viewing container logs in real-time. Not included in the stack, but easy to add if you want it.

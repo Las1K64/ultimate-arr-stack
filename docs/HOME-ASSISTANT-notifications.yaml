@@ -2,7 +2,7 @@
 # Paste into automations.yaml (or Settings → Automations → ⋮ → Edit in YAML),
 # then change the two CHANGE-ME values. See docs/HOME-ASSISTANT.md.
 #
-# Three body shapes arrive and are normalised into one notice (title, message,
+# Two body shapes arrive and are normalised into one notice (title, message,
 # optional link, level):
 #   1. GENERIC  {"title", "message", "level"?, "url"?, "tag"?}: the stack's own
 #      scripts (backup failure = critical, weekly queue-cleanup report = info,
@@ -11,7 +11,6 @@
 #      Any new sender should use this shape. The same `tag` replaces a notice.
 #   2. ARR      Sonarr/Radarr's webhook (`eventType` + `series`/`episodes` or
 #      `movie`). Health and ManualInteractionRequired are `warning`, the rest `info`.
-#   3. DIUN     (opt-in) top-level `image`, `status` (new|update), `hub_link`, `hostname`.
 #   Anything else still produces a `warning` saying it wasn't recognised.
 #
 # Levels: info = notification panel only; warning (default) = panel + push;
@@ -21,13 +20,13 @@
 # webhook body as JSON only when the header says so.
 #
 # Generated with LLM assistance and human-reviewed, and tested end to end
-# against Sonarr 4, Radarr 6, DIUN 4.33 and the stack's scripts. Read it
+# against Sonarr 4, Radarr 6 and the stack's scripts. Read it
 # before you use it.
 
 - id: arr_stack_notifications
   alias: Arr stack notifications
-  description: Every arr-stack sender (Sonarr, Radarr, DIUN, the stack's own
-    scripts) posts to one webhook; one notice in the HA panel, and a phone push
+  description: Every arr-stack sender (Sonarr, Radarr, Uptime Kuma, Beszel, the
+    stack's own scripts) posts to one webhook; one notice in the HA panel, and a phone push
     for warning/critical.
   triggers:
   # Every sender posts from the NAS straight to http://<HA LAN IP>:8123, never
@@ -42,11 +41,9 @@
   - variables:
       j: '{{ trigger.json if trigger.json is defined and trigger.json is mapping
         else {} }}'
-      # Order matters only in theory: no generic body carries `eventType`, and
-      # no Sonarr/Radarr body carries a top-level `image`.
+      # Order matters only in theory: no generic body carries `eventType`.
       kind: >-
         {%- if j.eventType is defined -%}arr
-        {%- elif j.image is defined and j.status is defined -%}diun
         {%- elif j.title is defined or j.message is defined -%}generic
         {%- else -%}unknown
         {%- endif -%}
@@ -140,7 +137,6 @@
           {%- elif ev == 'ApplicationUpdate' -%}{{ app }} updated to {{ j.get('newVersion') or 'a new version' }}
           {%- else -%}{{ app }}: {{ ev }}
           {%- endif -%}
-        {%- elif kind == 'diun' -%}Image update available
         {%- elif kind == 'generic' -%}{{ j.title | default('Arr stack', true) }}
         {%- else -%}Arr stack: unrecognised notification
         {%- endif -%}
@@ -158,10 +154,6 @@
           {%- elif ev == 'ApplicationUpdate' -%}Updated from {{ j.get('previousVersion') or 'the previous version' }}. Nothing to do.
           {%- else -%}{{ media or release_title or j.get('message') or 'No details in the payload.' }}
           {%- endif -%}
-        {%- elif kind == 'diun' -%}
-          {%- if j.get('status') == 'update' -%}{{ j.image }} was rebuilt upstream (same tag). If a container runs exactly this tag, recreate it to pick up the rebuild; otherwise ignore this.
-          {%- else -%}A newer {{ j.image }} was published. Bump its tag in the compose file when you're ready.
-          {%- endif -%}
         {%- elif kind == 'generic' -%}{{ j.message | default('(no message)', true) }}
         {%- elif trigger.json is defined -%}Body not in any known shape: {{ (trigger.json | tojson)[:600] }}
         {%- else -%}No JSON body. The sender must send Content-Type: application/json.
@@ -173,24 +165,21 @@
           {{- l if l in ['info', 'warning', 'critical'] else 'warning' -}}
         {%- else -%}warning
         {%- endif -%}
-      # Only an http(s) URL becomes a link. DIUN's hub_link is empty for
-      # registries it cannot build a page for, and an empty `url` is not
-      # something to hand the companion app.
+      # Only an http(s) URL becomes a link: an empty `url` is not something to
+      # hand the companion app.
       link: >-
-        {%- if kind == 'diun' -%}{% set u = j.hub_link | default('') %}
-        {%- elif kind == 'generic' -%}{% set u = j.url | default('') %}
+        {%- if kind == 'generic' -%}{% set u = j.url | default('') %}
         {%- elif kind == 'arr' and j.eventType in ['Health', 'HealthRestored'] -%}{% set u = j.wikiUrl | default('') %}
         {%- else -%}{% set u = '' %}
         {%- endif -%}
         {{- u if u is string and u.startswith('http') else '' -}}
       # The panel's notification_id AND the push `tag`: the same tag replaces
-      # the earlier notice in both places. DIUN per image; a Sonarr/Radarr
-      # health check per check, so HealthRestored replaces its own warning;
+      # the earlier notice in both places. A Sonarr/Radarr health check per
+      # check, so HealthRestored replaces its own warning;
       # a generic sender only if it asks. Everything else is unique and stacks,
       # which is what the old arr automation did.
       tag: >-
-        {%- if kind == 'diun' -%}diun_{{ j.image | slugify }}
-        {%- elif kind == 'arr' and j.eventType in ['Health', 'HealthRestored'] -%}arr_{{ (j.instanceName | default('arr', true) ~ '_health_' ~ j.type | default('')) | slugify }}
+        {%- if kind == 'arr' and j.eventType in ['Health', 'HealthRestored'] -%}arr_{{ (j.instanceName | default('arr', true) ~ '_health_' ~ j.type | default('')) | slugify }}
         {%- elif kind == 'generic' and j.tag | default('', true) -%}arrstack_{{ j.tag | string | slugify }}
         {%- else -%}arrstack_{{ context.id | lower }}
         {%- endif -%}
@@ -222,7 +211,7 @@
   # Several senders share this, and HA keeps only 5 traces by default.
   trace:
     stored_traces: 20
-  # DIUN sends one POST per image and several can land in the same second;
-  # `single` would drop all but the first.
+  # Several posts can land in the same second (health alerts from Sonarr and
+  # Radarr together, several Kuma monitors); `single` would drop all but the first.
   mode: queued
   max: 25
