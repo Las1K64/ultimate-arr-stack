@@ -38,21 +38,25 @@ http://192.168.1.20:8123/api/webhook/arr-stack-notify-CHANGE-ME
   HA_WEBHOOK_URL=http://192.168.1.20:8123/api/webhook/arr-stack-notify-CHANGE-ME
   ```
 
-- **Uptime Kuma:** Settings → Notifications → Setup Notification. Kuma's own *Home Assistant* type calls a notify action directly and skips this automation (with no action set it calls `notify.notify`, which may reach nothing), so use a webhook:
-  - Notification Type: **Webhook**. Post URL as above. Request Body: **Custom Body**, and paste:
+- **Uptime Kuma:** use a **Webhook** notification, not Kuma's *Home Assistant* type. That type calls a notify action directly (every device, unless you name one), so Kuma's alerts skip this automation: no consistent wording, no levels, and nothing replaces a "down" notice when the monitor recovers. In Kuma, Settings → Notifications → **Setup Notification**:
+  1. **Notification Type:** Webhook. **Friendly Name:** anything, e.g. `Home Assistant webhook`.
+  2. **Post URL:** the webhook URL above, the same value as `HA_WEBHOOK_URL` in `.env`. To copy it from the NAS to a Mac clipboard without typing it out: `ssh <nas> "sed -n 's/^HA_WEBHOOK_URL=//p' <stack dir>/.env" | tr -d "\"'\n" | pbcopy`
+  3. **HTTP Method:** POST.
+  4. **Request Body:** Custom Body, and paste:
 
-    ```
-    {%- if heartbeatJSON == nil -%}{%- assign level = "warning" -%}{%- capture title -%}Uptime Kuma test{%- endcapture -%}{%- capture message -%}Kuma can reach Home Assistant. Nothing to do.{%- endcapture -%}
-    {%- elsif heartbeatJSON.status == 0 -%}{%- assign level = "warning" -%}{%- capture title -%}{{ name }} is down{%- endcapture -%}{%- capture message -%}{{ heartbeatJSON.msg }}{% if monitorJSON.description %}. {{ monitorJSON.description }}{% endif %}{%- endcapture -%}
-    {%- else -%}{%- assign level = "info" -%}{%- capture title -%}{{ name }} is back up{%- endcapture -%}{%- capture message -%}Responding normally again.{%- endcapture -%}
-    {%- endif -%}
-    {"title": {{ title | json }}, "message": {{ message | json }}, "level": "{{ level }}", "tag": "kuma-{{ monitorJSON.id | default: 'test' }}"}
-    ```
+     ```
+     {%- if heartbeatJSON == nil -%}{%- assign level = "warning" -%}{%- capture title -%}Uptime Kuma test{%- endcapture -%}{%- capture message -%}Kuma can reach Home Assistant. Nothing to do.{%- endcapture -%}
+     {%- elsif heartbeatJSON.status == 0 -%}{%- assign level = "warning" -%}{%- capture title -%}{{ name }} is down{%- endcapture -%}{%- capture message -%}{{ heartbeatJSON.msg }}{% if monitorJSON.description %}. {{ monitorJSON.description }}{% endif %}{%- endcapture -%}
+     {%- else -%}{%- assign level = "info" -%}{%- capture title -%}{{ name }} is back up{%- endcapture -%}{%- capture message -%}Responding normally again.{%- endcapture -%}
+     {%- endif -%}
+     {"title": {{ title | json }}, "message": {{ message | json }}, "level": "{{ level }}", "tag": "kuma-{{ monitorJSON.id | default: 'test' }}"}
+     ```
 
-  - Additional Headers: `{"Content-Type": "application/json"}`. Without it Kuma sends the custom body as a form post and Home Assistant won't parse it.
-  - Tick *Default enabled* and *Apply on all existing monitors*.
+  5. Tick **Additional Headers** and enter `{"Content-Type": "application/json"}`. Without it Kuma sends the body as a form post and Home Assistant won't read it.
+  6. Tick **Default enabled** and **Apply on all existing monitors**, then **Save**.
+  7. If an older Kuma notification (such as a *Home Assistant* one) is still there, delete it, or every alert arrives twice.
 
-  A monitor going down pushes; coming back up replaces it in the panel without a push. A monitor's *Description* is added to its down message, so say there what to check.
+  A monitor going down sends a `warning`; coming back up sends an `info` that replaces it. A monitor's *Description* is added to its down message, so say there what to check.
 
 - **Beszel:** Settings → Notifications → Add URL. Its JSON template sends `title` and `message`, the generic shape. Alert thresholds are set per system: click the system and set CPU, memory, disk and load limits.
 
