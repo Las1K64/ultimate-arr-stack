@@ -79,7 +79,10 @@ ensure_services_running() {
   COMPOSE_FILE="$NAS_STACK_DIR/docker-compose.arr-stack.yml"
   [ -f "$COMPOSE_FILE" ] || return 0
 
-  CRITICAL="gluetun pihole sonarr radarr prowlarr qbittorrent jellyfin sabnzbd"
+  # Every arr-stack service except dnscrypt-proxy (pihole pulls it in). The
+  # nightly run has been what restores containers an outside updater deleted
+  # (docs/TROUBLESHOOTING.md, UGOS Docker auto-update), so leave none out.
+  CRITICAL="gluetun pihole sonarr radarr prowlarr qbittorrent sabnzbd flaresolverr jellyfin seerr bazarr"
   STOPPED=""
 
   for svc in $CRITICAL; do

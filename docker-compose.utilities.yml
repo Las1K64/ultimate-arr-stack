@@ -101,7 +101,7 @@ services:
   # See TROUBLESHOOTING.md "After a Gluetun RECREATE".
   # ═══════════════════════════════════════════════════════════════════════════
   gluetun-recover:
-    image: docker:29.8-cli
+    image: docker:29.9-cli
     container_name: gluetun-recover
     <<: *default-security
     volumes:
@@ -164,7 +164,7 @@ services:
   # Access: uptime.lan | NAS_IP:3001 (LAN-only, use WireGuard for remote)
   # ═══════════════════════════════════════════════════════════════════════════
   uptime-kuma:
-    image: louislam/uptime-kuma:2.5.5
+    image: louislam/uptime-kuma:2.5.6
     container_name: uptime-kuma
     <<: *default-security
     cap_add:
@@ -227,7 +227,7 @@ services:
   # Access: beszel.lan | NAS_IP:8090 (LAN-only, use WireGuard for remote)
   # ═══════════════════════════════════════════════════════════════════════════
   beszel:
-    image: henrygd/beszel:0.20
+    image: henrygd/beszel:0.21
     container_name: beszel
     <<: *default-security
     cap_add:
@@ -254,7 +254,7 @@ services:
       start_period: 30s
 
   beszel-agent:
-    image: henrygd/beszel-agent:0.20
+    image: henrygd/beszel-agent:0.21
     container_name: beszel-agent
     <<: *default-security
     restart: always
@@ -330,7 +330,7 @@ services:
   # Dry run first: docker compose -f docker-compose.utilities.yml run --rm -e DRY_RUN=true configarr
   # ═══════════════════════════════════════════════════════════════════════════
   configarr:
-    image: ghcr.io/raydak-labs/configarr:1.32.0
+    image: ghcr.io/raydak-labs/configarr:1.34.1
     # Opt-in: a bare `up -d` of this file used to start it too, and a run
     # creates the quality profiles its config names and (reset_unmatched_scores)
     # zeroes any score on them it doesn't list. `run configarr` still works.
