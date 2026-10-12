@@ -21,14 +21,14 @@
       "groupName": "LinuxServer.io images"
     },
     {
-      "description": "qBittorrent's registry still carries 20.04.x tags from old Ubuntu-based builds; they sort above 5.x but are years older",
+      "description": "qBittorrent's registry still carries 14.x and 20.04.x tags from old LinuxServer builds; they sort above 5.x but are years older. Real majors are single digits",
       "matchDatasources": [
         "docker"
       ],
       "matchPackageNames": [
         "lscr.io/linuxserver/qbittorrent"
       ],
-      "allowedVersions": "<20"
+      "allowedVersions": "/^[4-9]\\./"
     },
     {
       "description": "Group infrastructure images (Gluetun, Traefik, Cloudflared, Pi-hole)",
