@@ -30,7 +30,7 @@ docker compose -f docker-compose.arr-stack.yml up -d  # Restarts containers with
 # If you also run utilities (beszel, uptime-kuma, etc.), add -f docker-compose.utilities.yml to both commands
 ```
 
-> **Ugreen NAS users:** UGOS has a built-in Container Manager that automatically updates images on a schedule. Check **Docker → Settings → Auto Update** to configure. You can skip manual image updates if this is enabled.
+> **Ugreen NAS users: turn UGOS's automatic image updates off** (Docker app → Management → Image update → untick **Update detection**). It replaces containers outside compose, and it cannot rebuild the ones that share gluetun's network: it deletes them and fails to create the replacements. See [TROUBLESHOOTING.md](TROUBLESHOOTING.md#indexers-all-unavailable-every-monday-morning-ugos-docker-auto-update).
 
 > **Note:** Docker named volumes persist across restarts. All your service configurations (Sonarr settings, API keys, library data, etc.) are preserved.
 

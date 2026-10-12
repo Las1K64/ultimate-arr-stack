@@ -76,7 +76,7 @@
 | Uptime Kuma | 172.20.0.13 | 3001 | Service monitoring |
 | duc | 172.20.0.14 | 8838 | Disk usage |
 | Beszel | 172.20.0.15 | 8090 | System monitoring |
-| DIUN | 172.20.0.16 | — | Image update notifier (no UI) |
+| DIUN | 172.20.0.16 | — | Image update notifier (no UI; opt-in, `--profile diun`) |
 | Configarr | — | — | TRaSH Guides sync (one-shot, no UI, `manual` profile) |
 
 ### Service Connection Guide
@@ -221,5 +221,5 @@ Services start in dependency order (handled automatically by `depends_on`):
 | Uptime Kuma | Service uptime monitoring |
 | duc | Disk usage treemap |
 | Beszel | System metrics (CPU, RAM, disk, containers); hub plus `beszel-agent` |
-| DIUN | Docker image update notifications |
+| DIUN | Docker image update notifications (opt-in, `--profile diun`) |
 | Configarr | TRaSH Guides quality profile sync (one-shot, `manual` profile: only runs via `run --rm configarr`) |

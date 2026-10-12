@@ -6,11 +6,12 @@
 # optional link, level):
 #   1. GENERIC  {"title", "message", "level"?, "url"?, "tag"?}: the stack's own
 #      scripts (backup failure = critical, weekly queue-cleanup report = info,
-#      or warning when downloads still wait for a manual import).
+#      or warning when downloads still wait for a manual import), Uptime Kuma's
+#      custom webhook body and Beszel's JSON template.
 #      Any new sender should use this shape. The same `tag` replaces a notice.
 #   2. ARR      Sonarr/Radarr's webhook (`eventType` + `series`/`episodes` or
 #      `movie`). Health and ManualInteractionRequired are `warning`, the rest `info`.
-#   3. DIUN     top-level `image`, `status` (new|update), `hub_link`, `hostname`.
+#   3. DIUN     (opt-in) top-level `image`, `status` (new|update), `hub_link`, `hostname`.
 #   Anything else still produces a `warning` saying it wasn't recognised.
 #
 # Levels: info = notification panel only; warning (default) = panel + push;
@@ -158,8 +159,8 @@
           {%- else -%}{{ media or release_title or j.get('message') or 'No details in the payload.' }}
           {%- endif -%}
         {%- elif kind == 'diun' -%}
-          {%- if j.get('status') == 'update' -%}{{ j.image }} was rebuilt upstream (same tag). Recreate it to pick it up.
-          {%- else -%}A newer {{ j.image }} was published. Renovate will propose the bump on Monday; nothing to do now.
+          {%- if j.get('status') == 'update' -%}{{ j.image }} was rebuilt upstream (same tag). If a container runs exactly this tag, recreate it to pick up the rebuild; otherwise ignore this.
+          {%- else -%}A newer {{ j.image }} was published. Bump its tag in the compose file when you're ready.
           {%- endif -%}
         {%- elif kind == 'generic' -%}{{ j.message | default('(no message)', true) }}
         {%- elif trigger.json is defined -%}Body not in any known shape: {{ (trigger.json | tojson)[:600] }}

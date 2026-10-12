@@ -15,7 +15,7 @@ docker compose -f docker-compose.utilities.yml up -d
 | **Uptime Kuma** | Service monitoring dashboard | http://uptime.lan |
 | **Beszel** | System metrics (CPU, RAM, disk, containers) | http://beszel.lan |
 | **duc** | Disk usage analyzer (treemap UI) | http://duc.lan |
-| **DIUN** | Webhook notification when a newer image tag is published (set `DIUN_WEBHOOK_URL`, see [Home Assistant](HOME-ASSISTANT.md#step-2-point-every-sender-at-it)) | Internal |
+| **DIUN** | Opt-in (`--profile diun`). Webhook notification when a newer image tag is published. Skip it if Renovate runs on your fork, which opens a PR for each one (see [Home Assistant](HOME-ASSISTANT.md#step-2-point-every-sender-at-it)) | Internal |
 | **Configarr** | Syncs TRaSH Guides quality profiles to Sonarr/Radarr | Run manually |
 
 > **Want Docker log viewing?** [Dozzle](https://dozzle.dev/) is a lightweight web UI for viewing container logs in real-time. Not included in the stack, but easy to add if you want it.
@@ -59,10 +59,12 @@ to everything else on this page.
 TOKEN=$(head -c 24 /dev/urandom | md5sum | cut -c1-32)
 docker exec uptime-kuma sqlite3 /app/data/kuma.db \
   "INSERT INTO monitor (name, active, type, interval, retry_interval, maxretries, \
-   push_token, user_id, upside_down, accepted_statuscodes_json, method) \
-   VALUES ('VPN Check', 1, 'push', 600, 60, 1, '$TOKEN', 1, 0, '[\"200-299\"]', 'GET');"
+   push_token, user_id, upside_down, accepted_statuscodes_json, method, description) \
+   VALUES ('VPN Check', 1, 'push', 600, 60, 1, '$TOKEN', 1, 0, '[\"200-299\"]', 'GET', \
+   'check-vpn.sh has stopped passing. Its FAIL lines are in logs/check-vpn.log in the stack directory.');"
 
-# Attach your notification so it can actually reach you (id 1 = your default)
+# Attach your notification so it can actually reach you (id 1 = your default;
+# set it up as in HOME-ASSISTANT.md, step 2, or the alert reaches nothing)
 MID=$(docker exec uptime-kuma sqlite3 /app/data/kuma.db "SELECT id FROM monitor WHERE name='VPN Check';")
 docker exec uptime-kuma sqlite3 /app/data/kuma.db \
   "INSERT INTO monitor_notification (monitor_id, notification_id) VALUES ($MID, 1);"
