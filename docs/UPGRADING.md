@@ -40,6 +40,17 @@ docker compose -f docker-compose.arr-stack.yml up -d  # Restarts containers with
 
 When upgrading across versions, check below for any action required.
 
+### v1.16.0 → v1.16.1
+
+DIUN is removed. `git pull`, then delete what an earlier version left behind. Compose no longer knows the service, so remove it by name:
+
+```bash
+docker rm -f diun                      # if it is still there
+docker volume rm arr-stack_diun-data   # only its record of tags it has seen
+```
+
+Delete `DIUN_SCHEDULE` and `DIUN_WEBHOOK_URL` from `.env`. In Home Assistant, the automation's DIUN branch is now dead code and does no harm. To drop it, delete the lines that mention `diun` (or re-paste [HOME-ASSISTANT-notifications.yaml](HOME-ASSISTANT-notifications.yaml), keeping your `CHANGE-ME` values and any changes of your own).
+
 ### v1.15.0 → v1.16.0
 
 **On a Ugreen NAS, first turn off UGOS's image updater** (Docker app → Management → Image update → untick **Update detection** → Apply). It deletes containers it can't rebuild.
@@ -66,7 +77,7 @@ docker compose -f docker-compose.utilities.yml up -d --no-deps gluetun-recover u
 Wait for `Startup complete` in `docker logs jellyfin`; its healthcheck goes green before the migrations finish.
 
 - **Notifications:** set up the one automation and point every sender at it ([HOME-ASSISTANT.md](HOME-ASSISTANT.md)). If Uptime Kuma uses its *Home Assistant* notification type, switch it to the webhook described there, then press **Test** and check your phone.
-- **DIUN is now opt-in.** A running `diun` container keeps running. To keep it, use `--profile diun` when you recreate it; to drop it, `docker compose -f docker-compose.utilities.yml --profile diun rm -s -f diun`.
+- **DIUN:** removed in v1.16.1; see above.
 - **Backups grow** (the Sonarr, Radarr and Jellyfin databases are now in them), and a backup with a failed volume exits 1.
 
 ### v1.14.0 → v1.15.0

@@ -223,8 +223,8 @@ Services showing `(unhealthy)` may need attention. Common causes:
 Check for available updates:
 
 ```bash
-# Renovate (if installed on your fork) opens a PR per new version; DIUN
-# (opt-in, utilities stack) sends a notification instead
+# New versions arrive as tag bumps in this repo (Renovate opens a PR for each):
+# git pull, then pull and recreate what changed
 
 # Manual check
 docker compose -f docker-compose.arr-stack.yml pull

@@ -99,7 +99,6 @@ arr-stack network (172.20.0.0/24)
 │ 172.20.0.13  │ Uptime Kuma  │ Monitoring                     │ Optional         │
 │ 172.20.0.14  │ duc          │ Disk usage                     │ Optional         │
 │ 172.20.0.15  │ Beszel       │ System monitoring              │ Optional         │
-│ 172.20.0.16  │ DIUN         │ Image update notifier          │ Optional         │
 ───────────────────────────────────────────────────────────────────────────────────
 ```
 
@@ -168,7 +167,7 @@ Two YAML anchors define security profiles (`docker-compose.arr-stack.yml` has bo
 | `x-security` | All non-LSIO services | None by default (services add back only what they need) |
 | `x-security-lsio` | Sonarr, Radarr, Prowlarr, qBittorrent, SABnzbd, Bazarr | `CHOWN`, `SETUID`, `SETGID`, `DAC_OVERRIDE` (s6-overlay needs these to switch users during init) |
 
-Services that write to Docker volumes as root add back `CHOWN` + `DAC_OVERRIDE` (Jellyfin, Uptime Kuma, DUC, Beszel, DIUN, Configarr). Services with read-only or no volumes don't need any (FlareSolverr, Cloudflared, Traefik, Deunhealth, Beszel-agent). Nor does Seerr: it runs as a non-root user, which gets no effective capabilities from `cap_add`, and its volume is created with that user's ownership.
+Services that write to Docker volumes as root add back `CHOWN` + `DAC_OVERRIDE` (Jellyfin, Uptime Kuma, DUC, Beszel, Configarr). Services with read-only or no volumes don't need any (FlareSolverr, Cloudflared, Traefik, Deunhealth, Beszel-agent). Nor does Seerr: it runs as a non-root user, which gets no effective capabilities from `cap_add`, and its volume is created with that user's ownership.
 
 Additional requirements:
 - **Gluetun** — adds `NET_ADMIN` (required to create VPN tunnel interfaces), plus `CHOWN`, `DAC_OVERRIDE` and `SETUID`, which Docker's default set would have given it (gluetun chowns the OpenVPN config, and OpenVPN drops to `nonrootuser`; without `DAC_OVERRIDE` gluetun can't write `/tmp/gluetun/ip` on any VPN type)
