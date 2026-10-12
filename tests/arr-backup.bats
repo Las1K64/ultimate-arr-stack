@@ -603,3 +603,14 @@ run_backup() {
     grep -q 'Backup Failed' "$BATS_TEST_TMPDIR/curl.log"
     grep -q '"level":"critical"' "$BATS_TEST_TMPDIR/curl.log"
 }
+
+@test "the EXIT safety net starts every arr-stack service, dnscrypt-proxy aside" {
+    # The nightly run is what put back containers UGOS's image updater had
+    # deleted (TROUBLESHOOTING.md). A service left out of CRITICAL stays gone.
+    critical=$(sed -n 's/^ *CRITICAL="\(.*\)"$/\1/p' "$REPO_ROOT/scripts/arr-backup.sh" | tr ' ' '\n' | sort)
+    services=$(sed -n 's/^ *container_name: *"\{0,1\}\([a-z0-9_-]*\).*/\1/p' "$REPO_ROOT/docker-compose.arr-stack.yml" \
+        | grep -vx dnscrypt-proxy | sort)
+    [ -n "$critical" ]
+    [ -n "$services" ]
+    assert_equal "$critical" "$services"
+}

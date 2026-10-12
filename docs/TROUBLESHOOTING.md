@@ -115,6 +115,33 @@ docker restart prowlarr qbittorrent sabnzbd flaresolverr   # gluetun-recover doe
 
 Re-run the aggregate search to confirm it's back to ~1-2s. (Observed 2026-06-19: a throttled NL server gave a 54s search with two indexers at HTTP 500; `docker restart gluetun` + bouncing the dependents dropped it to **1.2s**, no config change.) If the new server is *also* slow, restart gluetun again to roll the dice on another. Only switch `VPN_COUNTRIES` (the section above) if you actually see HTTP 451 — that's a different problem.
 
+## Indexers: All Unavailable Every Monday Morning (UGOS Docker Auto-Update)
+
+**Symptom:** Early on a Monday, Sonarr and Radarr report **"All indexers are unavailable due to failures"**. Their logs show `Connection refused (gluetun:9696)`, and `docker ps` has **no `prowlarr` container at all** (or no `qbittorrent` / `sabnzbd`). A few hours later it is back, because the nightly backup's safety net ran `docker compose up -d` for whatever was missing. So it looks like a transient indexer blip, not a deleted container.
+
+**Cause:** the UGOS Docker app's own image updater. With **Update detection** and **Update as scheduled** on (weekly, Monday 04:00 by default), UGOS pulls any image whose tag was re-pushed upstream, **removes the old container**, and creates a new one from its saved settings. That create always fails for containers with `network_mode: "service:gluetun"`:
+
+```
+failed to create new container: ... conflicting options: port exposing and the container type network mode
+```
+
+The old container is already gone by then. The containers it *can* rebuild (traefik, gluetun-recover, sonarr, …) are recreated outside compose, which is what later makes `docker compose up -d --dry-run` want to recreate them. If it ever did this to gluetun, the whole VPN side would go down with it. (Observed 2026-10-12: Prowlarr missing 04:00–06:02. The same log showed it had already deleted qBittorrent, SABnzbd and Prowlarr on earlier Mondays.)
+
+**Fix:** UGOS **Docker** app → **Management** → **Image update** → untick **Update detection** → **Apply**. This stack pins image versions in its compose files; update them through the repo and compose, never through UGOS.
+
+**Restore anything it deleted** (dry-run first; see [After a Gluetun RECREATE](#after-a-gluetun-recreate-not-just-a-restart-docker-restart-cannot-save-you)):
+```bash
+cd /volume1/docker/arr-stack
+docker compose -f docker-compose.arr-stack.yml up -d --dry-run prowlarr 2>&1 | grep -iE 'recreate|creat'
+docker compose -f docker-compose.arr-stack.yml up -d prowlarr
+```
+
+**See what UGOS did:** its update runs are logged in a root-only SQLite database:
+```bash
+sudo sqlite3 -readonly /volume1/@appstore/com.ugreen.docker/db/docker_info_log.db \
+  "select created_at, content from docker_log order by id desc limit 30;"
+```
+
 ## Apps Unreachable After a VPN Reconnect (Stale Network Namespace)
 
 > **Note (v1.7.23):** Sonarr and Radarr were moved off the VPN onto the bridge, so they are **no longer affected** by this — a gluetun restart can't strand them. This section now applies only to the remaining VPN-bound apps: **qBittorrent, SABnzbd, Prowlarr, FlareSolverr**.

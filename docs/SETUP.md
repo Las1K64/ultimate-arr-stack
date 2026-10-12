@@ -221,6 +221,8 @@ sudo chown -R 1000:1000 "$NAS_STACK_DIR"
 
 **Note:** Service configs are stored in Docker named volumes (auto-created on first run). Docker commands on Ugreen NAS need `sudo` by default — to skip that, add your user to the `docker` group once: `sudo usermod -aG docker $USER`, then log out of SSH and back in. After that, plain `docker` and `docker compose` work without `sudo`.
 
+**Turn off UGOS's Docker auto-update.** In the **Docker** app → **Management** → **Image update**, untick **Update detection** and click **Apply**. When it's on, UGOS updates containers itself every week. It can't rebuild a container that shares gluetun's network, so it deletes Prowlarr, qBittorrent or SABnzbd and fails to create the replacement. This stack pins its image versions in the compose files; update through the repo instead. Details: [TROUBLESHOOTING.md](TROUBLESHOOTING.md#indexers-all-unavailable-every-monday-morning-ugos-docker-auto-update).
+
 <details>
 <summary><strong>Note on UGOS Antivirus</strong></summary>
 
