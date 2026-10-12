@@ -40,6 +40,35 @@ docker compose -f docker-compose.arr-stack.yml up -d  # Restarts containers with
 
 When upgrading across versions, check below for any action required.
 
+### v1.15.0 → v1.16.0
+
+**On a Ugreen NAS, first turn off UGOS's image updater** (Docker app → Management → Image update → untick **Update detection** → Apply). It deletes containers it can't rebuild.
+
+Eight image bumps. Jellyfin's and Beszel's database changes are one-way, so back up their config volumes first, with both stopped (the `up -d` below starts them again on the new images). Pass only the services you mean, each through its own compose file, and never `--remove-orphans`:
+
+```bash
+cd $NAS_STACK_DIR && git pull
+docker compose -f docker-compose.arr-stack.yml stop jellyfin
+docker compose -f docker-compose.utilities.yml stop beszel
+mkdir -p backups
+for v in jellyfin-config beszel-data; do
+  docker run --rm -v arr-stack_$v:/src:ro -v "$PWD/backups":/bak alpine tar czf /bak/$v-$(date +%Y%m%d).tgz -C /src .
+done
+
+docker compose -f docker-compose.arr-stack.yml pull jellyfin qbittorrent
+docker compose -f docker-compose.arr-stack.yml up -d --no-deps jellyfin qbittorrent seerr bazarr   # seerr/bazarr: depends_on changed
+docker compose -f docker-compose.cloudflared.yml pull cloudflared
+docker compose -f docker-compose.cloudflared.yml up -d --no-deps cloudflared
+docker compose -f docker-compose.utilities.yml pull gluetun-recover uptime-kuma beszel beszel-agent
+docker compose -f docker-compose.utilities.yml up -d --no-deps gluetun-recover uptime-kuma beszel beszel-agent
+```
+
+Wait for `Startup complete` in `docker logs jellyfin`; its healthcheck goes green before the migrations finish.
+
+- **Notifications:** set up the one automation and point every sender at it ([HOME-ASSISTANT.md](HOME-ASSISTANT.md)). If Uptime Kuma uses its *Home Assistant* notification type, switch it to the webhook described there, then press **Test** and check your phone.
+- **DIUN is now opt-in.** A running `diun` container keeps running. To keep it, use `--profile diun` when you recreate it; to drop it, `docker compose -f docker-compose.utilities.yml --profile diun rm -s -f diun`.
+- **Backups grow** (the Sonarr, Radarr and Jellyfin databases are now in them), and a backup with a failed volume exits 1.
+
 ### v1.14.0 → v1.15.0
 
 `git pull`, then recreate the two services whose definitions changed, each through its own compose file:
