@@ -21,27 +21,38 @@ set -euo pipefail
 #   ./scripts/check-stuck-requests.sh --post -v # with the requests it judged fine
 #   ./scripts/check-stuck-requests.sh --test    # post a test notice, whatever it finds
 #
-#   STUCK_DAYS=3 MOVIE_STUCK_DAYS=7 ./scripts/check-stuck-requests.sh   # thresholds
+#   STUCK_DAYS=3 MOVIE_STUCK_DAYS=7 MAX_SEARCHES=20 ./scripts/check-stuck-requests.sh
 #
 # Cron (daily, 08:30):
 #   30 8 * * * $NAS_STACK_DIR/scripts/check-stuck-requests.sh --post >> $NAS_STACK_DIR/logs/check-stuck-requests.log 2>&1
 #
 # Prerequisites:
 #   - Seerr, Sonarr and Radarr running, with their ports published on localhost
+#   - Prowlarr too, for the "never grabbed" cases: each one gets a Prowlarr
+#     search (at most MAX_SEARCHES a run) to say whether the indexers have the
+#     title at all, and under what kind of name. Without it those lines say so.
 #   - python3 and curl available
 #   - HA_WEBHOOK_URL in .env (see docs/HOME-ASSISTANT.md) for --post
 #
 # What it reports, each with the title, who asked, how long ago, and what to do:
 #   - Seerr approved a request but never handed it to Sonarr/Radarr, or marked
-#     it FAILED (the hand-over failed, typically during a VPN blip).
+#     it FAILED (the hand-off did not go through).
 #   - Sonarr monitored nothing for a TV request: Seerr asked for season numbers
 #     that don't exist in the TVDB record, or every requested season is
 #     unmonitored.
 #   - Episodes aired at least STUCK_DAYS ago, still missing, and Sonarr has
-#     never grabbed them: the indexers probably name the show differently.
+#     never grabbed them. A Prowlarr search says whether the indexers have
+#     releases under the show's title that Sonarr never took (numbering
+#     differs) or nothing under that title at all (named differently, or
+#     nobody carries it).
 #   - A Radarr movie that is available, in Radarr for MOVIE_STUCK_DAYS or more,
-#     with no file and nothing ever grabbed: often a TV broadcast with a TMDB
-#     movie entry, which Radarr can never match.
+#     with no file and nothing ever grabbed, sorted by a Prowlarr search:
+#     only TV-style releases under its title (S01E01…) is a TV broadcast with a
+#     TMDB movie entry, which Radarr can never match; film-style releases it
+#     never took means Radarr is rejecting them; none under its title means no
+#     enabled indexer carries it. A film still in cinemas with no home release
+#     date yet, or a home release still to come, is waiting correctly and is
+#     not reported.
 #   - Any monitored Sonarr series with no monitored season, request or not.
 #
 # One notice, level "info" (panel only), tag "stuck-requests" so each day's
@@ -50,8 +61,9 @@ set -euo pipefail
 #
 # ⚠️  This script was generated with LLM assistance and human-reviewed.
 #     Read and understand it before running. Do not execute scripts you
-#     don't understand on your system. It only reads from the apps' APIs;
-#     --post sends one HTTP POST to your own Home Assistant.
+#     don't understand on your system. It only reads from the apps' APIs
+#     (Prowlarr searches query your indexers); --post sends one HTTP POST to
+#     your own Home Assistant.
 #
 
 # Derive stack directory from script location
@@ -67,6 +79,7 @@ LOG_FILE="$NAS_STACK_DIR/logs/check-stuck-requests.log"
 MAX_LOG_LINES=2000
 STUCK_DAYS="${STUCK_DAYS:-3}"
 MOVIE_STUCK_DAYS="${MOVIE_STUCK_DAYS:-7}"
+MAX_SEARCHES="${MAX_SEARCHES:-20}"
 
 # --- Parse arguments ---
 POST=false
@@ -128,6 +141,7 @@ get_seerr_api_key() {
 SEERR_KEY=$(get_seerr_api_key) || true
 SONARR_KEY=$(get_arr_api_key sonarr) || true
 RADARR_KEY=$(get_arr_api_key radarr) || true
+PROWLARR_KEY=$(get_arr_api_key prowlarr) || true
 
 if [[ -z "$SEERR_KEY" ]]; then
   log "ERROR: Could not read Seerr's API key. Is the seerr container running?"
@@ -137,6 +151,9 @@ if [[ -z "$SONARR_KEY" ]] && [[ -z "$RADARR_KEY" ]]; then
   log "ERROR: Could not read Sonarr's or Radarr's API key. Are the containers running?"
   exit 1
 fi
+if [[ -z "$PROWLARR_KEY" ]]; then
+  log "WARNING: Could not read Prowlarr's API key; 'never grabbed' lines will be unverified"
+fi
 
 # The python below writes the Home Assistant notice here, since only it knows
 # what the run found. An empty file means nothing to post.
@@ -144,22 +161,24 @@ NOTICE_FILE=$(mktemp)
 trap 'rm -f "$NOTICE_FILE"' EXIT
 
 # --- Main check (python3 for JSON processing) ---
-python3 - "$VERBOSE" "$TEST" "$SEERR_KEY" "$SONARR_KEY" "$RADARR_KEY" \
-  "$NOTICE_FILE" "$NAS_STACK_DIR" "$STUCK_DAYS" "$MOVIE_STUCK_DAYS" << 'PYEOF'
-import json, subprocess, sys
+python3 - "$VERBOSE" "$TEST" "$SEERR_KEY" "$SONARR_KEY" "$RADARR_KEY" "$PROWLARR_KEY" \
+  "$NOTICE_FILE" "$NAS_STACK_DIR" "$STUCK_DAYS" "$MOVIE_STUCK_DAYS" "$MAX_SEARCHES" << 'PYEOF'
+import json, re, subprocess, sys, unicodedata, urllib.parse
 from datetime import datetime, timezone
 
 VERBOSE = sys.argv[1] == "true"
 TEST = sys.argv[2] == "true"
-SEERR_KEY, SONARR_KEY, RADARR_KEY = sys.argv[3:6]
-NOTICE_FILE = sys.argv[6]
-NAS_STACK_DIR = sys.argv[7]
-STUCK_DAYS = int(sys.argv[8])
-MOVIE_STUCK_DAYS = int(sys.argv[9])
+SEERR_KEY, SONARR_KEY, RADARR_KEY, PROWLARR_KEY = sys.argv[3:7]
+NOTICE_FILE = sys.argv[7]
+NAS_STACK_DIR = sys.argv[8]
+STUCK_DAYS = int(sys.argv[9])
+MOVIE_STUCK_DAYS = int(sys.argv[10])
+MAX_SEARCHES = int(sys.argv[11])
 
 SEERR = ("http://localhost:5055", SEERR_KEY)
 SONARR = ("http://localhost:8989", SONARR_KEY)
 RADARR = ("http://localhost:7878", RADARR_KEY)
+PROWLARR = ("http://localhost:9696", PROWLARR_KEY)
 
 NOW = datetime.now(timezone.utc)
 
@@ -172,13 +191,13 @@ def verbose(msg):
     if VERBOSE:
         print(f"  [verbose] {msg}")
 
-def api_get(base, path):
+def api_get(base, path, timeout=30):
     """GET JSON with the app's API key in a header, so it never lands in a
     log line. None on any failure (HTTP >= 400 included)."""
     url, key = base[0] + path, base[1]
     result = subprocess.run(
-        ["curl", "-s", "-f", "-m", "30", "-H", f"X-Api-Key: {key}", url],
-        capture_output=True, text=True, timeout=40)
+        ["curl", "-s", "-f", "-m", str(timeout), "-H", f"X-Api-Key: {key}", url],
+        capture_output=True, text=True, timeout=timeout + 10)
     if result.returncode != 0:
         return None
     try:
@@ -219,6 +238,48 @@ def requester(req):
 def service_id(req):
     media = req.get("media") or {}
     return media.get("externalServiceId4k") if req.get("is4k") else media.get("externalServiceId")
+
+# ---- Prowlarr: does any enabled indexer have the title, and named how? ----
+# A free-text search returns everything containing the words ("Enzo" brings
+# back Come Dine with Me and a FLAC album), so a release counts only when its
+# name starts with one of the title's spellings, the way Sonarr and Radarr
+# themselves match. Release names are normalised to lowercase words without
+# accents or punctuation.
+def norm(s):
+    s = unicodedata.normalize("NFKD", s or "")
+    s = "".join(c for c in s if not unicodedata.combining(c)).lower()
+    return re.sub(r"[^a-z0-9]+", " ", s).strip()
+
+TV_SHAPED = re.compile(r"\bs\d{1,2}(e\d{1,3})?\b|\b\d{1,2}x\d{2}\b|\b(19|20)\d{2} \d{2} \d{2}\b")
+
+searches_done = 0
+
+def prowlarr_releases(titles):
+    """Release names on the enabled indexers that start with one of `titles`,
+    or None when Prowlarr can't be asked (no key, failed, or over the cap)."""
+    global searches_done
+    titles = [t for t in titles if t]
+    if not PROWLARR_KEY or not titles or searches_done >= MAX_SEARCHES:
+        return None
+    searches_done += 1
+    wanted = set()
+    for t in titles:
+        for variant in (t, t.replace("&", " and ")):
+            if norm(variant):
+                wanted.add(norm(variant))
+    query = urllib.parse.quote(titles[0])
+    # Movies (2000s) and TV (5000s) only: drops audio and adult hits.
+    results = api_get(PROWLARR, f"/api/v1/search?query={query}&type=search"
+                                f"&categories=2000&categories=5000", timeout=90)
+    if results is None:
+        return None
+    found = []
+    for r in results:
+        name = r.get("title") or ""
+        n = norm(name)
+        if any(n == w or n.startswith(w + " ") for w in wanted):
+            found.append(name)
+    return found
 
 findings = []   # dicts: app, title, who, when, diagnosis
 seen = set()    # one line per (problem, thing), however many requests point at it
@@ -268,9 +329,9 @@ def seerr_title(req):
 for req in failed:
     app = "Sonarr" if req.get("type") == "tv" else "Radarr"
     add_finding("Seerr", seerr_title(req), requester(req), ago(days_since(req.get("createdAt"))),
-                f"Seerr marked this request FAILED: it could not hand it to {app} "
-                f"(often a VPN blip at the time). Open Seerr → Requests and retry it, "
-                f"or decline it.", key=("Seerr-failed", req.get("id")))
+                f"Seerr marked this request FAILED: the hand-off to {app} did not go through. "
+                f"Open Seerr → Requests and retry it, or decline it.",
+                key=("Seerr-failed", req.get("id")))
 
 # Approved requests old enough to judge. A TV request whose media is already
 # partly available is still checked for aired-but-never-grabbed episodes: a
@@ -375,11 +436,23 @@ if SONARR_KEY:
             aired = f"{plural(oldest_days, 'day')} ago"
         codes = [f"S{e.get('seasonNumber', 0):02d}E{e.get('episodeNumber', 0):02d}" for _, e in never]
         shown = ", ".join(codes[:4]) + (f" and {len(codes) - 4} more" if len(codes) > 4 else "")
+        them = "it" if len(never) == 1 else "them"
+        releases = prowlarr_releases([title] + [a.get("title") for a in series.get("alternateTitles", [])])
+        if releases is None:
+            why = ("Prowlarr could not be asked whether the indexers have it, so check a "
+                   "Prowlarr search for the title yourself.")
+        elif releases:
+            why = (f"Prowlarr finds {plural(len(releases), 'release')} under this title that "
+                   f"Sonarr never took (e.g. {releases[0][:60]}): the episode numbering probably "
+                   f"differs from TVDB's. Grab one from Sonarr → Interactive Search, or import "
+                   f"it by hand.")
+        else:
+            why = ("no enabled indexer has a release under this title: they may name the show "
+                   "differently (a release group called The Up Series \"70 Up\"), or nobody "
+                   "carries it. Search Prowlarr for the name the release groups use, then push "
+                   "the release to Sonarr or import it by hand.")
         add_finding("Sonarr", title, who, when,
-                    f"{shown} aired {aired} and Sonarr has never grabbed "
-                    f"{'it' if len(never) == 1 else 'them'}: no indexer carries it, or they name "
-                    f"this show differently. Check a Prowlarr search for the title; push the "
-                    f"release to Sonarr under a title it can parse, or add a scene mapping.",
+                    f"{shown} aired {aired} and Sonarr has never grabbed {them}: {why}",
                     key=("Sonarr-never", series["id"], tuple(codes)))
 
     if len(findings) == sonarr_before:
@@ -439,21 +512,57 @@ if RADARR_KEY:
         if in_radarr is None or in_radarr < MOVIE_STUCK_DAYS:
             verbose(f"{title}: available but in Radarr only {in_radarr} day(s)")
             continue
+        # "Available" by Radarr's minimum-availability rule is not "out at
+        # home". A film still in cinemas with no home date yet, or a home
+        # release still to come, has nothing to find: waiting is right.
+        home_dates = [d for d in (parse_date(movie.get("digitalRelease")),
+                                  parse_date(movie.get("physicalRelease"))) if d]
+        home = min(home_dates) if home_dates else None
+        cinema = parse_date(movie.get("inCinemas"))
+        if home and home > NOW:
+            verbose(f"{title}: home release due {home:%Y-%m-%d}; waiting is right")
+            continue
+        if home is None and cinema and (NOW - cinema).days < 365:
+            verbose(f"{title}: in cinemas {cinema:%Y-%m-%d}, no home release date yet; waiting is right")
+            continue
         history = api_get(RADARR, f"/api/v3/history/movie?movieId={movie['id']}") or []
         if any(h.get("eventType") == "grabbed" for h in history):
             verbose(f"{title}: grabbed at least once (a download problem, not a naming one)")
             continue
+        since = f"home release {home:%Y-%m-%d}" if home else "no home release date on TMDB"
+        names = [movie.get("title"), movie.get("originalTitle")] + \
+                [a.get("title") for a in movie.get("alternateTitles", [])]
+        releases = prowlarr_releases(names)
+        if releases is None:
+            why = ("Prowlarr could not be asked whether the indexers have it. If this is a TV "
+                   "broadcast with a TMDB movie entry, Radarr can never match it: check a "
+                   "Prowlarr search for the title yourself.")
+        else:
+            tv = [r for r in releases if TV_SHAPED.search(norm(r))]
+            films = [r for r in releases if r not in tv]
+            if tv and not films:
+                why = (f"the indexers have it only as TV episodes (e.g. {tv[0][:60]}): a TV "
+                       f"broadcast with a TMDB movie entry, which Radarr can never match. Delete "
+                       f"it from Radarr and request the series instead.")
+            elif films:
+                why = (f"Prowlarr finds {plural(len(films), 'release')} under this title that "
+                       f"Radarr never took (e.g. {films[0][:60]}). Open Radarr → Interactive "
+                       f"Search to see why it rejects them (quality profile, custom-format score, "
+                       f"year or title mismatch).")
+            else:
+                why = ("no enabled indexer has a release under this title. Wait, add an indexer "
+                       "that carries it, or decline the request.")
         add_finding("Radarr", title, who, when,
-                    f"Available, in Radarr {plural(in_radarr, 'day')}, never grabbed. If this "
-                    f"is a TV broadcast with a TMDB movie entry, Radarr can never match it: "
-                    f"delete it from Radarr and request the series instead. Otherwise check "
-                    f"a Prowlarr search for the title.",
+                    f"In Radarr {plural(in_radarr, 'day')}, {since}, never grabbed: {why}",
                     key=("Radarr-never", movie["id"]))
     if len(findings) == radarr_before:
         print("  - nothing stuck")
 elif movie_candidates:
     print("\n--- Radarr ---")
     print(f"  ✗ No Radarr API key; {len(movie_candidates)} movie request(s) not checked")
+
+if searches_done:
+    verbose(f"Prowlarr searches this run: {searches_done} (cap {MAX_SEARCHES})")
 
 # -------------------------------------------------------------- Summary ---
 print(f"\n{'=' * 40}")

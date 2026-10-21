@@ -167,7 +167,7 @@ Removed releases are blocklisted so the same broken release won't be grabbed aga
 
 ## Stuck Requests
 
-A request can sit undownloaded for weeks while every step reports success. Three naming authorities are involved and nothing checks that a request turned into monitored, findable episodes: Seerr follows TMDB, Sonarr follows TVDB, and release groups name files however they like. The case that prompted this check is in [TROUBLESHOOTING.md](TROUBLESHOOTING.md#seerr-request-stuck-for-weeks-while-the-release-exists-three-naming-authorities). `scripts/check-stuck-requests.sh` reads Seerr's requests, asks Sonarr and Radarr what became of each one, and posts one `info` notice to the Home Assistant panel (tag `stuck-requests`, so each day's notice replaces the last). It changes nothing in any app and posts nothing when nothing is stuck.
+A request can sit undownloaded for weeks while every step reports success. Three naming authorities are involved and nothing checks that a request turned into monitored, findable episodes: Seerr follows TMDB, Sonarr follows TVDB, and release groups name files however they like. The case that prompted this check is in [TROUBLESHOOTING.md](TROUBLESHOOTING.md#seerr-request-stuck-for-weeks-while-the-release-exists-three-naming-authorities). `scripts/check-stuck-requests.sh` reads Seerr's requests, asks Sonarr and Radarr what became of each one and Prowlarr whether the indexers have it, and posts one `info` notice to the Home Assistant panel (tag `stuck-requests`, so each day's notice replaces the last). It changes nothing in any app and posts nothing when nothing is stuck.
 
 ```bash
 ./scripts/check-stuck-requests.sh            # dry run: report, post nothing
@@ -180,13 +180,13 @@ A request can sit undownloaded for weeks while every step reports success. Three
 
 Each line names the title, who requested it, how long ago, and what to do:
 
-- **Seerr never handed it over**, or marked the request *Failed* (usually a VPN blip at the time). Retry it from Seerr → Requests.
+- **Seerr never handed it over**, or marked the request *Failed* (the hand-off did not go through). Retry it from Seerr → Requests.
 - **Sonarr monitored nothing.** Seerr asked for season numbers the TVDB record doesn't have (Seerr sent "season 10"; TVDB numbers that show's seasons 1964 … 2026), or every requested season is unmonitored. Re-request from the TVDB-linked entry, or monitor the season in Sonarr.
-- **Aired, missing, never grabbed.** An episode aired `STUCK_DAYS` (default 3) or more days ago, has no file, and Sonarr's history holds no grab for it. The indexers probably name the show differently: check a Prowlarr search for the title and push the release to Sonarr under a name it can parse.
-- **Radarr: available, never grabbed.** A monitored, released movie that has been in Radarr for `MOVIE_STUCK_DAYS` (default 7) or more days with no file and no history. Often a TV broadcast with a TMDB *movie* entry, which Radarr can never match: delete it and request the series.
+- **Aired, missing, never grabbed.** An episode aired `STUCK_DAYS` (default 3) or more days ago, has no file, and Sonarr's history holds no grab for it. A Prowlarr search for the show's title then says which it is: releases under that title Sonarr never took (the episode numbering differs from TVDB's; grab one from Interactive Search), or nothing under that title at all (the release groups name it differently, as "70 Up" for *The Up Series*, or nobody carries it).
+- **Radarr: never grabbed.** A monitored, available movie in Radarr for `MOVIE_STUCK_DAYS` (default 7) or more days with no file and no history, sorted by a Prowlarr search for its title. Only TV-style releases (`S01E01…`): a TV broadcast with a TMDB *movie* entry, which Radarr can never match; delete it and request the series. Film-style releases Radarr never took: open Interactive Search to see why it rejects them. Nothing under the title: no enabled indexer carries it. A film still in cinemas with no home release date yet, or whose home release is still to come, is waiting correctly and is not reported.
 - **A monitored Sonarr series with no monitored season**, whether or not a request points at it (catches manual adds).
 
-Thresholds come from the environment: `STUCK_DAYS=5 MOVIE_STUCK_DAYS=14 ./scripts/check-stuck-requests.sh`. A film that isn't released yet, and an episode that was grabbed but failed to download, are left to Radarr, Sonarr and the [queue cleanup](#queue-cleanup).
+Thresholds come from the environment: `STUCK_DAYS=5 MOVIE_STUCK_DAYS=14 MAX_SEARCHES=20 ./scripts/check-stuck-requests.sh`. `MAX_SEARCHES` caps the Prowlarr searches per run, so a bad week doesn't spend an indexer's daily API allowance; without Prowlarr the "never grabbed" lines say so and leave the search to you. A film that isn't out yet, and an episode that was grabbed but failed to download, are left to Radarr, Sonarr and the [queue cleanup](#queue-cleanup).
 
 ### Automated (cron)
 

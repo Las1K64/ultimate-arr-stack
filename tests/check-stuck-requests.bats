@@ -6,17 +6,20 @@
 # The motivating case is modelled exactly: in September 2026 Seerr asked
 # Sonarr for "season 10" of a show whose TVDB seasons are numbered by year
 # (1964 … 2026), Sonarr monitored nothing, Seerr logged "accepted", and two
-# aired episodes sat five weeks while the indexers had them all along.
+# aired episodes sat five weeks while the indexers had them all along. Its
+# twin, a TMDB movie entry for the same broadcast, is modelled on the Radarr
+# side: the indexers have the title only as S10E01-style episodes.
 #
 # `docker` and `curl` are stubbed on PATH, and the script runs from a copy in a
 # throwaway stack directory with no .env. The curl stub serves each API call
-# from a fixture and logs every call, with its body, to $CURL_LOG. Dates in the
-# fixtures are written relative to now, so the age thresholds are real.
+# from a fixture and logs every call, with its body, to $CURL_LOG. A Prowlarr
+# search is served from prowlarr-<title-slug>.json, or an empty list. Dates in
+# the fixtures are written relative to now, so the age thresholds are real.
 
 setup() {
     load helpers/setup
     command -v python3 >/dev/null || skip "python3 not installed"
-    unset HA_WEBHOOK_URL STUCK_DAYS MOVIE_STUCK_DAYS
+    unset HA_WEBHOOK_URL STUCK_DAYS MOVIE_STUCK_DAYS MAX_SEARCHES
 
     STACK="$BATS_TEST_TMPDIR/stack"
     mkdir -p "$STACK/scripts"
@@ -25,13 +28,15 @@ setup() {
     export CURL_LOG="$BATS_TEST_TMPDIR/curl.log"
     export HA_NOTICE="$BATS_TEST_TMPDIR/notice.json"
     export FIX="$BATS_TEST_TMPDIR/fixtures"
+    export STUB_CONTAINERS="gluetun seerr sonarr radarr prowlarr"
     mkdir -p "$FIX"
     : > "$CURL_LOG"
 
-    # Fixtures with dates relative to now. Requests: the 70 Up mapping (10),
-    # aired episodes never grabbed (11), a movie never grabbed (12), a movie
-    # not released yet (13), a FAILED hand-over (14), one too recent to judge
-    # (15), and one that is fine because its missing episode was grabbed (16).
+    # Requests: the 70 Up mapping (10), aired episodes never grabbed (11), the
+    # 70 Up "movie" (12), a movie not released yet (13), a FAILED hand-over
+    # (14), one too recent to judge (15), one fine because its missing episode
+    # was grabbed (16), a film still in cinemas (17), an old film no indexer
+    # carries (18), and a film the indexers have but Radarr never took (19).
     python3 - "$FIX" <<'PY'
 import json, sys
 from datetime import datetime, timedelta, timezone
@@ -43,14 +48,18 @@ adam, kris = {"displayName": "adam"}, {"displayName": "kris"}
 def req(i, typ, days, media, seasons=(), status=2, by=adam):
     return {"id": i, "status": status, "type": typ, "createdAt": ago(days), "is4k": False,
             "media": media, "seasons": [{"seasonNumber": n} for n in seasons], "requestedBy": by}
-dump("seerr-requests", {"pageInfo": {"pages": 1, "pageSize": 200, "results": 7, "page": 1}, "results": [
+def movie_media(tmdb, ext): return {"status": 3, "tmdbId": tmdb, "tvdbId": None, "externalServiceId": ext}
+dump("seerr-requests", {"pageInfo": {"pages": 1, "pageSize": 200, "results": 10, "page": 1}, "results": [
     req(10, "tv", 36, {"status": 3, "tmdbId": 999, "tvdbId": 139751, "externalServiceId": 95}, [10]),
     req(11, "tv", 20, {"status": 3, "tmdbId": 888, "tvdbId": 5050, "externalServiceId": 50}, [1], by=kris),
-    req(12, "movie", 30, {"status": 3, "tmdbId": 777, "tvdbId": None, "externalServiceId": 200}),
-    req(13, "movie", 30, {"status": 3, "tmdbId": 778, "tvdbId": None, "externalServiceId": 201}),
+    req(12, "movie", 30, movie_media(777, 200)),
+    req(13, "movie", 30, movie_media(778, 201)),
     req(14, "movie", 79, {"status": 1, "tmdbId": 555, "tvdbId": None, "externalServiceId": None}, status=4),
     req(15, "tv", 1, {"status": 3, "tmdbId": 888, "tvdbId": 5050, "externalServiceId": 50}, [1]),
     req(16, "tv", 10, {"status": 3, "tmdbId": 666, "tvdbId": 6060, "externalServiceId": 60}, [1]),
+    req(17, "movie", 40, movie_media(779, 202)),
+    req(18, "movie", 90, movie_media(780, 203)),
+    req(19, "movie", 25, movie_media(781, 204)),
 ]})
 dump("seerr-requests-page2", {"pageInfo": {"pages": 2, "pageSize": 200, "results": 0, "page": 2}, "results": []})
 dump("seerr-movie-555", {"id": 555, "title": "Failed Film"})
@@ -70,11 +79,29 @@ dump("sonarr-episodes-50", [ep(501, 1, 1, 15, False), ep(502, 1, 2, 8, False), e
 dump("sonarr-history-50", [])
 dump("sonarr-episodes-60", [ep(601, 1, 1, 10, False)])
 dump("sonarr-history-60", [{"episodeId": 601, "eventType": "grabbed", "date": ago(9), "sourceTitle": "Fine.Show.S01E01"}])
-dump("radarr-movie-200", {"id": 200, "title": "Seventy Up", "year": 2026, "monitored": True,
-                          "isAvailable": True, "hasFile": False, "added": ago(30)})
+def movie(i, title, year, **kw):
+    m = {"id": i, "title": title, "year": year, "monitored": True, "isAvailable": True,
+         "hasFile": False, "added": ago(30)}
+    m.update(kw); return m
+# The 70 Up "movie": broadcast on 2026-09-15, a digital date, indexers have S10E01/E02.
+dump("radarr-movie-200", movie(200, "Seventy Up", 2026, digitalRelease=ago(36)))
 dump("radarr-history-200", [])
-dump("radarr-movie-201", {"id": 201, "title": "Not Yet", "year": 2027, "monitored": True,
-                          "isAvailable": False, "hasFile": False, "added": ago(30)})
+dump("radarr-movie-201", movie(201, "Not Yet", 2027, isAvailable=False))
+# Still in cinemas, no home date: waiting is right.
+dump("radarr-movie-202", movie(202, "Arthouse Film", 2026, inCinemas=ago(60), added=ago(40)))
+dump("radarr-history-202", [])
+# A 2003 film with no dates at all on TMDB and nothing on any indexer.
+dump("radarr-movie-203", movie(203, "Old Obscure", 2003, added=ago(90)))
+dump("radarr-history-203", [])
+# Out at home, the indexers have film-shaped releases, Radarr never took one.
+dump("radarr-movie-204", movie(204, "Grabbable", 2025, digitalRelease=ago(30), added=ago(25)))
+dump("radarr-history-204", [])
+def rel(title, indexer="NZBgeek"): return {"title": title, "indexer": indexer, "categories": []}
+dump("prowlarr-seventy-up", [rel("Seventy.Up.S10E01.1080p.HDTV.H264-GRP"), rel("Seventy.Up.S10E02.1080p.HDTV.H264-GRP"),
+                             rel("Seventy.Nine.Up.2019.1080p.WEB-DL")])   # not a prefix match
+dump("prowlarr-grabbable", [rel("Grabbable.2025.1080p.WEB-DL.DDP5.1.H.264-GRP"), rel("Grabbable.2025.2160p.WEB-DL-GRP"),
+                            rel("Ungrabbable.2025.1080p")])
+dump("prowlarr-phony", [rel("Phony.S01E01.720p.WEB.h264-GRP", "EZTV")])
 PY
 
     STUB_BIN="$BATS_TEST_TMPDIR/bin"
@@ -82,7 +109,7 @@ PY
     cat > "$STUB_BIN/docker" <<'STUB'
 #!/bin/bash
 case "$1 $2" in
-  "ps "*) printf '%s\n' gluetun seerr sonarr radarr ;;
+  "ps "*) tr ' ' '\n' <<< "$STUB_CONTAINERS" ;;
   "exec seerr") printf '{"main": {"apiKey": "seerr-key", "applicationTitle": "Seerr"}}\n' ;;
   exec\ *) printf '<Config>\n  <Port>8989</Port>\n  <ApiKey>key-%s</ApiKey>\n</Config>\n' "$2" ;;
   *) exit 1 ;;
@@ -103,6 +130,12 @@ done
 case "$data" in @*) data=$(cat "${data#@}") ;; esac
 printf '%s %s %s\n' "$method" "$url" "$data" >> "$CURL_LOG"
 serve() { [ -f "$FIX/$1.json" ] && cat "$FIX/$1.json" || exit 22; }
+# A Prowlarr search is served by the query's slug, empty when no fixture has it.
+search() {
+  local q="${url#*query=}"; q="${q%%&*}"; q="${q//+/ }"
+  q=$(printf '%b' "${q//%/\\x}" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9' '-'); q="${q#-}"; q="${q%-}"
+  [ -f "$FIX/prowlarr-$q.json" ] && cat "$FIX/prowlarr-$q.json" || echo '[]'
+}
 case "$method $url" in
   "GET http://localhost:5055/api/v1/request?take=200&skip=0&"*) serve seerr-requests ;;
   "GET http://localhost:5055/api/v1/request?take=200&skip=200&"*) serve seerr-requests-page2 ;;
@@ -113,6 +146,7 @@ case "$method $url" in
   "GET http://localhost:8989/api/v3/history/series?seriesId="*) serve "sonarr-history-${url##*=}" ;;
   "GET http://localhost:7878/api/v3/movie/"*) serve "radarr-movie-${url##*/}" ;;
   "GET http://localhost:7878/api/v3/history/movie?movieId="*) serve "radarr-history-${url##*=}" ;;
+  "GET http://localhost:9696/api/v1/search?query="*) search ;;
   "POST http://ha.test/"*) printf '%s' "$data" > "$HA_NOTICE" ;;
   *) exit 22 ;;
 esac
@@ -136,25 +170,89 @@ posts() {
     # The 70 Up case: Seerr's season number isn't one TVDB uses.
     assert_output --partial "The Up Series (adam, requested 36 days ago)"
     assert_output --partial "Seerr asked for season(s) 10 but TVDB numbers this show's seasons 1964, 1970 … 2019, 2026"
-    # Aired, missing, never grabbed: oldest episode's age leads.
+    # Aired, missing, never grabbed; Prowlarr has it under the title, so numbering differs.
     assert_output --partial "Phony (kris, requested 20 days ago)"
-    assert_output --partial "S01E01, S01E02 aired 15 days ago and Sonarr has never grabbed them"
-    # A movie that is available and has no history at all.
-    assert_output --partial "Seventy Up (2026) (adam, requested 30 days ago)"
-    assert_output --partial "Available, in Radarr 30 days, never grabbed. If this is a TV broadcast with a TMDB movie entry"
+    assert_output --partial "S01E01, S01E02 aired 15 days ago and Sonarr has never grabbed them: Prowlarr finds 1 release under this title that Sonarr never took (e.g. Phony.S01E01.720p.WEB.h264-GRP)"
     # Seerr's own FAILED state, titled from Seerr since Radarr never saw it.
     assert_output --partial "Failed Film (adam, requested 79 days ago)"
-    assert_output --partial "Seerr marked this request FAILED"
+    assert_output --partial "Seerr marked this request FAILED: the hand-off to Radarr did not go through."
+    refute_output --partial "VPN"
     # The sweep: monitored series with nothing monitored, no request behind it.
     assert_output --partial "Orphan (no Seerr request, added 12 days ago)"
     assert_output --partial "every season is unmonitored"
-    assert_output --partial "Summary: 5 stuck requests (1 Radarr, 1 Seerr, 3 Sonarr)"
+    assert_output --partial "Summary: 7 stuck requests (3 Radarr, 1 Seerr, 3 Sonarr)"
     # Left alone: unreleased film, grabbed episode, too-recent request, unmonitored series.
     refute_output --partial "Not Yet"
     refute_output --partial "Fine Show"
     refute_output --partial "Dropped"
     assert_output --partial "Notice: would post (dry run; use --post)"
     [ "$(posts)" -eq 0 ]
+}
+
+@test "Radarr: the indexers have the title only as episodes, so it is the TV-broadcast trap" {
+    run "$STACK/scripts/check-stuck-requests.sh"
+    assert_success
+    assert_output --partial "Seventy Up (2026) (adam, requested 30 days ago)"
+    assert_output --regexp "In Radarr 30 days, home release 20[0-9]{2}-[0-9]{2}-[0-9]{2}, never grabbed: the indexers have it only as TV episodes \(e\.g\. Seventy\.Up\.S10E01\.1080p\.HDTV\.H264-GRP\): a TV broadcast with a TMDB movie entry, which Radarr can never match\. Delete it from Radarr and request the series instead\."
+}
+
+@test "Radarr: film-shaped releases Radarr never took point at Interactive Search" {
+    run "$STACK/scripts/check-stuck-requests.sh"
+    assert_success
+    assert_output --partial "Grabbable (2025) (adam, requested 25 days ago)"
+    assert_output --partial "never grabbed: Prowlarr finds 2 releases under this title that Radarr never took (e.g. Grabbable.2025.1080p.WEB-DL.DDP5.1.H.264-GRP). Open Radarr → Interactive Search"
+    # "Ungrabbable.2025" contains the title but doesn't start with it.
+    refute_output --partial "finds 3 releases"
+}
+
+@test "Radarr: nothing under the title on any enabled indexer" {
+    run "$STACK/scripts/check-stuck-requests.sh"
+    assert_success
+    assert_output --partial "Old Obscure (2003) (adam, requested 90 days ago)"
+    assert_output --partial "In Radarr 90 days, no home release date on TMDB, never grabbed: no enabled indexer has a release under this title. Wait, add an indexer that carries it, or decline the request."
+}
+
+@test "Radarr: a film still in cinemas with no home release date is waiting, not stuck" {
+    run "$STACK/scripts/check-stuck-requests.sh" -v
+    assert_success
+    refute_output --partial "✗ Arthouse Film"
+    assert_output --regexp "\[verbose\] Arthouse Film \(2026\): in cinemas 20[0-9]{2}-[0-9]{2}-[0-9]{2}, no home release date yet; waiting is right"
+    # A Prowlarr search is spent only on the cases that need one.
+    [ "$(grep -c '^GET http://localhost:9696/api/v1/search' "$CURL_LOG")" -eq 4 ]
+    assert_output --partial "Prowlarr searches this run: 4 (cap 20)"
+}
+
+@test "Radarr: a home release still to come is waiting, not stuck" {
+    python3 - "$FIX/radarr-movie-204.json" <<'PY'
+import json, sys
+from datetime import datetime, timedelta, timezone
+m = json.load(open(sys.argv[1]))
+m["digitalRelease"] = (datetime.now(timezone.utc) + timedelta(days=12)).strftime("%Y-%m-%dT00:00:00Z")
+json.dump(m, open(sys.argv[1], "w"))
+PY
+    run "$STACK/scripts/check-stuck-requests.sh" -v
+    assert_success
+    refute_output --partial "✗ Grabbable"
+    assert_output --partial "home release due"
+}
+
+@test "without Prowlarr, the never-grabbed lines say they are unverified" {
+    export STUB_CONTAINERS="gluetun seerr sonarr radarr"
+    run "$STACK/scripts/check-stuck-requests.sh"
+    assert_success
+    assert_output --partial "WARNING: Could not read Prowlarr's API key"
+    assert_output --partial "Seventy Up (2026)"
+    assert_output --partial "never grabbed: Prowlarr could not be asked whether the indexers have it. If this is a TV broadcast with a TMDB movie entry, Radarr can never match it"
+    assert_output --partial "Sonarr has never grabbed them: Prowlarr could not be asked"
+    run grep -c '^GET http://localhost:9696' "$CURL_LOG"
+    assert_output 0
+}
+
+@test "the per-run search cap is honoured" {
+    MAX_SEARCHES=1 run "$STACK/scripts/check-stuck-requests.sh" -v
+    assert_success
+    [ "$(grep -c '^GET http://localhost:9696/api/v1/search' "$CURL_LOG")" -eq 1 ]
+    assert_output --partial "Prowlarr could not be asked"
 }
 
 @test "the sweep stays quiet about a series a request already explains" {
@@ -171,7 +269,7 @@ posts() {
     [ "$(posts)" -eq 1 ]
     [ "$(notice level)" = info ]
     [ "$(notice tag)" = stuck-requests ]
-    [ "$(notice title)" = "Stuck requests: 5 requests waiting" ]
+    [ "$(notice title)" = "Stuck requests: 7 requests waiting" ]
     run notice message
     assert_output --partial "• The Up Series (Sonarr; adam, requested 36 days ago): Request monitored nothing in Sonarr"
     assert_output --partial "• Seventy Up (2026) (Radarr; adam, requested 30 days ago)"
@@ -242,6 +340,13 @@ PY
     assert_success
     assert_output --partial "S01E01, S01E02 aired in $year and Sonarr has never grabbed them"
     refute_output --partial "9745 days"
+}
+
+@test "Sonarr: nothing under the title on any indexer names the 70 Up renaming" {
+    rm "$FIX/prowlarr-phony.json"
+    run "$STACK/scripts/check-stuck-requests.sh"
+    assert_success
+    assert_output --partial "Sonarr has never grabbed them: no enabled indexer has a release under this title: they may name the show differently"
 }
 
 @test "--post without a webhook fails before any API call" {
