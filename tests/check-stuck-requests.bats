@@ -101,7 +101,8 @@ dump("prowlarr-seventy-up", [rel("Seventy.Up.S10E01.1080p.HDTV.H264-GRP"), rel("
                              rel("Seventy.Nine.Up.2019.1080p.WEB-DL")])   # not a prefix match
 dump("prowlarr-grabbable", [rel("Grabbable.2025.1080p.WEB-DL.DDP5.1.H.264-GRP"), rel("Grabbable.2025.2160p.WEB-DL-GRP"),
                             rel("Ungrabbable.2025.1080p")])
-dump("prowlarr-phony", [rel("Phony.S01E01.720p.WEB.h264-GRP", "EZTV")])
+# The second hit is a season Sonarr isn't missing (a same-named show's, say): not counted.
+dump("prowlarr-phony", [rel("Phony.S01E01.720p.WEB.h264-GRP", "EZTV"), rel("Phony.S03E04.720p.WEB.h264-GRP", "EZTV")])
 PY
 
     STUB_BIN="$BATS_TEST_TMPDIR/bin"
@@ -172,7 +173,7 @@ posts() {
     assert_output --partial "Seerr asked for season(s) 10 but TVDB numbers this show's seasons 1964, 1970 … 2019, 2026"
     # Aired, missing, never grabbed; Prowlarr has it under the title, so numbering differs.
     assert_output --partial "Phony (kris, requested 20 days ago)"
-    assert_output --partial "S01E01, S01E02 aired 15 days ago and Sonarr has never grabbed them: Prowlarr finds 1 release under this title that Sonarr never took (e.g. Phony.S01E01.720p.WEB.h264-GRP)"
+    assert_output --partial "S01E01, S01E02 aired 15 days ago and Sonarr has never grabbed them: Prowlarr finds 1 release for season(s) 1 under this title that Sonarr never took (e.g. Phony.S01E01.720p.WEB.h264-GRP). If they are this show and not a same-named one"
     # Seerr's own FAILED state, titled from Seerr since Radarr never saw it.
     assert_output --partial "Failed Film (adam, requested 79 days ago)"
     assert_output --partial "Seerr marked this request FAILED: the hand-off to Radarr did not go through."

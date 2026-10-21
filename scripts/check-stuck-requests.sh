@@ -438,14 +438,26 @@ if SONARR_KEY:
         shown = ", ".join(codes[:4]) + (f" and {len(codes) - 4} more" if len(codes) > 4 else "")
         them = "it" if len(never) == 1 else "them"
         releases = prowlarr_releases([title] + [a.get("title") for a in series.get("alternateTitles", [])])
+        # Only releases for the missing seasons count: a same-named show (the
+        # US remake of a UK series) brings back every season it ever had.
+        missing_seasons = {e.get("seasonNumber") for _, e in never}
+        if releases:
+            relevant = []
+            for r in releases:
+                m = re.search(r"\bs(\d{1,2})(?:e\d{1,3})?\b|\b(\d{1,2})x\d{2}\b", norm(r))
+                season = int(m.group(1) or m.group(2)) if m else None
+                if season is None or season in missing_seasons:
+                    relevant.append(r)
+            releases = relevant
         if releases is None:
             why = ("Prowlarr could not be asked whether the indexers have it, so check a "
                    "Prowlarr search for the title yourself.")
         elif releases:
-            why = (f"Prowlarr finds {plural(len(releases), 'release')} under this title that "
-                   f"Sonarr never took (e.g. {releases[0][:60]}): the episode numbering probably "
-                   f"differs from TVDB's. Grab one from Sonarr → Interactive Search, or import "
-                   f"it by hand.")
+            why = (f"Prowlarr finds {plural(len(releases), 'release')} for season(s) "
+                   f"{season_list(missing_seasons)} under this title that Sonarr never took "
+                   f"(e.g. {releases[0][:60]}). If they are this show and not a same-named one, "
+                   f"the episode numbering differs from TVDB's: grab one from Sonarr → "
+                   f"Interactive Search, or import it by hand.")
         else:
             why = ("no enabled indexer has a release under this title: they may name the show "
                    "differently (a release group called The Up Series \"70 Up\"), or nobody "
