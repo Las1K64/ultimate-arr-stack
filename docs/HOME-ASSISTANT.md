@@ -1,6 +1,6 @@
 # Home Assistant Integration
 
-Every notification from the stack goes to Home Assistant through **one automation on one webhook**: Sonarr and Radarr, Uptime Kuma, Beszel, the nightly backup's failure alert and the weekly queue-cleanup report. Each notice says what happened and what, if anything, to do ("Ready to watch: …", "Needs manual import: … Open Radarr → Activity → Queue and import it").
+Every notification from the stack goes to Home Assistant through **one automation on one webhook**: Sonarr and Radarr, Uptime Kuma, Beszel, the nightly backup's failure alert, the weekly queue-cleanup report and the daily stuck-request check. Each notice says what happened and what, if anything, to do ("Ready to watch: …", "Needs manual import: … Open Radarr → Activity → Queue and import it").
 
 ## Prerequisites
 
@@ -32,7 +32,7 @@ http://192.168.1.20:8123/api/webhook/arr-stack-notify-CHANGE-ME
 ```
 
 - **Sonarr and Radarr:** Settings → Connect → + → Webhook. URL as above, method POST. Events: *On Import Complete*, *On Upgrade*, *On Health Issue*, *On Health Restored*, *On Manual Interaction Required*. Skip *On Grab* and *On Movie Added*: they fire before anything is ready.
-- **The backup and the queue cleanup:** set this line in `.env` on the NAS. The scripts read it themselves.
+- **The backup, the queue cleanup and the stuck-request check:** set this line in `.env` on the NAS. The scripts read it themselves.
 
   ```bash
   HA_WEBHOOK_URL=http://192.168.1.20:8123/api/webhook/arr-stack-notify-CHANGE-ME
@@ -74,6 +74,7 @@ Home Assistant answers `200 OK` to *any* webhook ID, including one with no autom
 | Sonarr and Radarr: Settings → Connect → the webhook → **Test** | Panel only: "Radarr: test notification / Radarr can reach Home Assistant. Nothing to do." |
 | Uptime Kuma: Settings → Notifications → the webhook → **Test** | Push: "Uptime Kuma test / Kuma can reach Home Assistant. Nothing to do." |
 | `./scripts/arr-backup.sh --tar --usb no-such-dir` (fails before touching anything) | Push: "Arr Stack: Backup Failed / Failed during: finding USB device…" |
+| `./scripts/check-stuck-requests.sh --test` | Panel only: "Stuck-request check: test / The daily stuck-request check can reach Home Assistant. Nothing to do." |
 
 A notice titled "Arr stack: unrecognised notification" means the body wasn't understood. Most often the sender didn't send `Content-Type: application/json`, which Home Assistant needs before it parses a body at all.
 

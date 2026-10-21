@@ -437,6 +437,31 @@ docker exec pihole pihole -g   # confirm both lists succeed
 
 Current Pi-hole versions chown files back to `pihole` after each gravity run, so once corrected this shouldn't recur.
 
+## Seerr: Request Stuck for Weeks While the Release Exists (Three Naming Authorities)
+
+**Symptom:** A Seerr request shows *Processing* (or *Partially Available*) for weeks. Seerr's log says Sonarr or Radarr accepted it. Sonarr or Radarr shows the title, healthy. Nothing is in any queue, nothing has errored anywhere, and the release is on the indexers: a Prowlarr search finds it in seconds.
+
+**Cause:** Three services name the same programme three ways, and nothing checks that a request resolved into monitored, findable episodes. Seerr follows TMDB, Sonarr follows TVDB, and the release groups follow neither. In September 2026 ITV's two-part *70 Up* hit every failure mode at once and sat five weeks while EZTV and NZBgeek had both parts at 1080p:
+
+1. **A TMDB *movie* entry for a TV broadcast.** Seerr sent it to Radarr. Radarr marked it available and searched every night for a film-shaped release that can never exist: zero results, zero history, zero errors, Seerr *Processing* for ever.
+2. **A duplicate TMDB TV entry with no TVDB link** and a single "season 10". Seerr sent Sonarr `seasons: [10]`. Sonarr's TVDB record numbers the show's seasons by year (1964 … 2026), so season 10 matched nothing, every season stayed unmonitored, and Seerr logged "Sonarr accepted request".
+3. **Release groups name it `70.Up.S10E01`**, while Sonarr knows the show as *The Up Series* with no scene mapping. Even with a season monitored by hand, Sonarr's own search returned 0.
+
+**Diagnose:** the daily check names each stuck request and what to do; run it by hand with the requests it judged fine included:
+
+```bash
+./scripts/check-stuck-requests.sh -v
+```
+
+For one request by hand: open the title in Seerr and follow *Manage* to the Sonarr or Radarr entry it points at. In Sonarr, check which seasons are monitored and whether the requested season number exists at all. In Radarr, an empty *History* tab on an "available" movie means it has never found a single release.
+
+**Fix:**
+- *Wrong season numbering:* re-request from the TVDB-linked entry (Seerr's search often lists the show twice; the right entry carries a TVDB id and the full season list), or monitor the right season in Sonarr and search it.
+- *TV broadcast in Radarr:* delete it from Radarr and from Seerr's requests, and request the series instead.
+- *Indexers name it differently:* find the release in Prowlarr and push it to Sonarr, or download it and import it by hand (Sonarr → Wanted → Manual Import).
+
+**Prevention:** `scripts/check-stuck-requests.sh` runs daily from cron and posts a panel notice the day a request passes its threshold (three days for TV, seven for a movie). Setup in [MAINTENANCE.md § Stuck Requests](MAINTENANCE.md#stuck-requests).
+
 ## Seerr: "/app/config volume mount was not configured properly"
 
 **Symptom:** Seerr's setup wizard (or its settings pages) shows a banner: *The /app/config volume mount was not configured properly. All data will be cleared when the container is stopped or restarted.*
