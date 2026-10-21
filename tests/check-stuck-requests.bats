@@ -120,6 +120,9 @@ dump("prowlarr-seventy-up", [rel("Seventy.Up.S10E01.1080p.HDTV.H264-GRP"), rel("
 # The second hit is a season Sonarr isn't missing (a same-named show's, say): not counted.
 dump("prowlarr-phony", [rel("Phony.S01E01.720p.WEB.h264-GRP", "EZTV"), rel("Phony.S03E04.720p.WEB.h264-GRP", "EZTV")])
 dump("prowlarr-indexers", [{"id": 3, "name": "EZTV"}, {"id": 7, "name": "NZBgeek"}])
+# Prowlarr syncs the indexers into each app under its own naming; EZTV is TV-only.
+dump("radarr-indexers", [{"name": "NZBgeek (Prowlarr)"}])
+dump("sonarr-indexers", [{"name": "NZBgeek (Prowlarr)"}, {"name": "EZTV (Prowlarr)"}])
 PY
 
     STUB_BIN="$BATS_TEST_TMPDIR/bin"
@@ -164,6 +167,8 @@ case "$method $url" in
   "GET http://localhost:8989/api/v3/episode?seriesId="*) serve "sonarr-episodes-${url##*=}" ;;
   "GET http://localhost:8989/api/v3/history/series?seriesId="*) serve "sonarr-history-${url##*=}" ;;
   "GET http://localhost:8989/api/v3/release?episodeId="*) serve_or_empty "sonarr-release-${url##*=}" ;;
+  "GET http://localhost:8989/api/v3/indexer") serve sonarr-indexers ;;
+  "GET http://localhost:7878/api/v3/indexer") serve radarr-indexers ;;
   "GET http://localhost:7878/api/v3/movie/"*) serve "radarr-movie-${url##*/}" ;;
   "GET http://localhost:7878/api/v3/history/movie?movieId="*) serve "radarr-history-${url##*=}" ;;
   "GET http://localhost:7878/api/v3/release?movieId="*) serve_or_empty "radarr-release-${url##*=}" ;;
@@ -279,6 +284,37 @@ PY
     refute_output --partial "EZTV in failure backoff"
     # The title probe is skipped: no Prowlarr search is spent on an untrustworthy zero.
     run grep -c '^GET http://localhost:9696/api/v1/search' "$CURL_LOG"
+    assert_output 0
+}
+
+@test "a backed-off indexer the app doesn't use leaves its zero trusted, with a note" {
+    python3 - "$FIX/prowlarr-indexerstatus.json" <<'PY'
+import json, sys
+from datetime import datetime, timedelta, timezone
+till = (datetime.now(timezone.utc) + timedelta(minutes=4)).strftime("%Y-%m-%dT%H:%M:%SZ")
+json.dump([{"indexerId": 3, "disabledTill": till}], open(sys.argv[1], "w"))
+PY
+    run "$STACK/scripts/check-stuck-requests.sh"
+    assert_success
+    # EZTV is TV-only: Radarr's zero stands, the title probe runs, and the note says who didn't answer.
+    assert_output --partial "Old Obscure (2003)"
+    assert_output --partial "never grabbed: no enabled indexer has a release under this title. Wait, add an indexer that carries it, or decline the request. EZTV is in failure backoff, so re-check once it answers."
+    assert_output --partial "Seventy Up (2026)"
+    assert_output --partial "the indexers have it only as TV episodes"
+    refute_output --partial "so that zero is not to be trusted"
+}
+
+@test "rejections about the match mean another title with the same name, not a profile problem" {
+    python3 - "$FIX/sonarr-release-501.json" <<'PY'
+import json, sys
+json.dump([{"title": "Phony.US.S01E01.1080p", "indexer": "EZTV", "approved": False, "rejected": True,
+            "rejections": ["Wrong series"]}] * 7, open(sys.argv[1], "w"))
+PY
+    run "$STACK/scripts/check-stuck-requests.sh" --apply
+    assert_success
+    assert_output --partial "Sonarr has never grabbed them: Sonarr finds 7 releases under this title and rejects them all (Wrong series): they belong to another title with the same name, so nothing it recognises as this one is on any enabled indexer. Wait, add an indexer that carries it, or decline the request."
+    refute_output --partial "Sonarr finds 7 releases and rejects them all"
+    run grep -c 'EpisodeSearch' "$CURL_LOG"
     assert_output 0
 }
 

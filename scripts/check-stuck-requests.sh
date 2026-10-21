@@ -306,7 +306,31 @@ def indexers_in_backoff():
                           for i in (api_get(PROWLARR, "/api/v1/indexer") or [])}
     return [_indexer_names.get(s.get("indexerId")) or f"indexer {s.get('indexerId')}" for s in backed]
 
-def rejection_reasons(releases, limit=2):
+_app_indexers = {}
+
+def app_indexer_names(base):
+    """Normalised names of the indexers this app searches through (Prowlarr
+    syncs them in as e.g. "NZBgeek (Prowlarr)")."""
+    if base[0] not in _app_indexers:
+        _app_indexers[base[0]] = [norm(i.get("name")) for i in (api_get(base, "/api/v3/indexer") or [])]
+    return _app_indexers[base[0]]
+
+def backoff_for(base):
+    """The backed-off indexers that matter to this app: EZTV being down says
+    nothing about a film search, since only NZBgeek carries films here."""
+    backed = indexers_in_backoff()
+    if not backed:
+        return backed
+    mine = app_indexer_names(base)
+    if not mine:
+        return backed
+    return [b for b in backed if any(m.startswith(norm(b)) for m in mine)]
+
+# A rejection about the match ("Wrong series", "Unknown Movie") means the
+# release is another title with the same name, not a profile problem.
+MATCH_REJECTION = re.compile(r"wrong (series|movie)|unknown (series|movie)|mismatch|not match|title", re.I)
+
+def rejection_advice(app, releases, limit=2):
     seen_r, reasons = set(), []
     for r in releases:
         for reason in r.get("rejections") or []:
@@ -316,7 +340,14 @@ def rejection_reasons(releases, limit=2):
     shown = "; ".join(reasons[:limit])
     if len(reasons) > limit:
         shown += f"; and {len(reasons) - limit} more"
-    return shown or "no reason given"
+    shown = shown or "no reason given"
+    if reasons and all(MATCH_REJECTION.search(r) for r in reasons):
+        return (f"{app} finds {plural(len(releases), 'release')} under this title and rejects "
+                f"them all ({shown}): they belong to another title with the same name, so nothing "
+                f"it recognises as this one is on any enabled indexer. Wait, add an indexer that "
+                f"carries it, or decline the request.")
+    return (f"{app} finds {plural(len(releases), 'release')} and rejects them all ({shown}). "
+            f"Fix the quality profile or custom formats, or decline the request.")
 
 def release_label(r):
     name = (r.get("title") or "?")[:60]
@@ -432,15 +463,20 @@ for req in approved:
     else:
         movie_candidates.append(req)
 
-def nothing_found(app, title_probe):
-    """Why a release search found nothing: an indexer in backoff makes the
-    zero worthless; otherwise ask Prowlarr by title (title_probe) and name
-    what, if anything, the indexers hold under that name."""
-    backoff = indexers_in_backoff()
+def nothing_found(app, base, title_probe):
+    """Why a release search found nothing: one of the app's indexers in
+    backoff makes the zero worthless; otherwise ask Prowlarr by title
+    (title_probe) and name what, if anything, the indexers hold under that
+    name. The probe is told which indexers didn't answer, so "nothing at all"
+    is qualified when one of them might have."""
+    backoff = backoff_for(base)
     if backoff:
         return (f"{app}'s own search found nothing, but Prowlarr has {', '.join(backoff)} in "
                 f"failure backoff, so that zero is not to be trusted. Try again later.")
-    return title_probe()
+    unanswered = indexers_in_backoff() or []
+    note = (f" {', '.join(unanswered)} is in failure backoff, so re-check once it answers."
+            if unanswered else "")
+    return title_probe(note)
 
 # --------------------------------------------------------------- Sonarr ---
 if SONARR_KEY:
@@ -534,7 +570,7 @@ if SONARR_KEY:
         found = indexer_search(lambda: api_get(
             SONARR, f"/api/v3/release?episodeId={oldest_ep.get('id')}", timeout=120))
 
-        def sonarr_title_probe(title=title, series=series, missing_seasons=missing_seasons):
+        def sonarr_title_probe(note, title=title, series=series, missing_seasons=missing_seasons):
             releases = prowlarr_releases([title] + [a.get("title") for a in series.get("alternateTitles", [])])
             if releases is None:
                 return ("Sonarr's own search found nothing and Prowlarr could not be asked, so "
@@ -557,7 +593,7 @@ if SONARR_KEY:
             return ("no enabled indexer has a release under this title: they may name the show "
                     "differently (a release group called The Up Series \"70 Up\"), or nobody "
                     "carries it. Search Prowlarr for the name the release groups use, then push "
-                    "the release to Sonarr or import it by hand.")
+                    "the release to Sonarr or import it by hand." + note)
 
         if found is None:
             why = ("Sonarr's own search could not be run (over this run's search cap, or the "
@@ -576,11 +612,9 @@ if SONARR_KEY:
             else:
                 why += "Run with --apply to queue the search, or click Search in Sonarr."
         elif found:
-            why = (f"Sonarr finds {plural(len(found), 'release')} and rejects them all "
-                   f"({rejection_reasons(found)}). Fix the quality profile or custom formats, "
-                   f"or decline the request.")
+            why = rejection_advice("Sonarr", found)
         else:
-            why = nothing_found("Sonarr", sonarr_title_probe)
+            why = nothing_found("Sonarr", SONARR, sonarr_title_probe)
         add_finding("Sonarr", title, who, when,
                     f"{shown} aired {aired} and Sonarr has never grabbed {them}: {why}",
                     key=("Sonarr-never", series["id"], tuple(codes)))
@@ -665,7 +699,7 @@ if RADARR_KEY:
         found = indexer_search(lambda: api_get(
             RADARR, f"/api/v3/release?movieId={movie['id']}", timeout=120))
 
-        def radarr_title_probe(movie=movie):
+        def radarr_title_probe(note, movie=movie):
             names = [movie.get("title"), movie.get("originalTitle")] + \
                     [a.get("title") for a in movie.get("alternateTitles", [])]
             releases = prowlarr_releases(names)
@@ -685,7 +719,7 @@ if RADARR_KEY:
                         f"Radarr doesn't recognise them as this film (year or title mismatch). "
                         f"Open Radarr → Interactive Search and compare.")
             return ("no enabled indexer has a release under this title. Wait, add an indexer "
-                    "that carries it, or decline the request.")
+                    "that carries it, or decline the request." + note)
 
         if found is None:
             why = ("Radarr's own search could not be run (over this run's search cap, or the "
@@ -704,11 +738,9 @@ if RADARR_KEY:
             else:
                 why += "Run with --apply to queue the search, or click Search in Radarr."
         elif found:
-            why = (f"Radarr finds {plural(len(found), 'release')} and rejects them all "
-                   f"({rejection_reasons(found)}). Fix the quality profile or custom formats, "
-                   f"or decline the request.")
+            why = rejection_advice("Radarr", found)
         else:
-            why = nothing_found("Radarr", radarr_title_probe)
+            why = nothing_found("Radarr", RADARR, radarr_title_probe)
         add_finding("Radarr", title, who, when,
                     f"In Radarr {plural(in_radarr, 'day')}, {since}, never grabbed: {why}",
                     key=("Radarr-never", movie["id"]))
