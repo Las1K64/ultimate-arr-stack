@@ -56,6 +56,7 @@ For each part of the stack: which check covers it, where that check runs, whethe
 | `configure-apps.sh` HTTP helpers, Bazarr plan, command line | | fails | blocks | | | | |
 | Duplicate `.lan` detection: hook check 8 and `check-dns-duplicates.sh` (SSH, docker and a grep without `-P` faked) | | fails | blocks | | | | |
 | `queue-cleanup.sh` leaves downloads matched by ID for a manual import and names them in the weekly notice, still removing other blocked imports (docker, curl stubbed) | | fails | blocks | | | | |
+| `check-stuck-requests.sh` finds a request whose season number isn't in TVDB's list, aired episodes never grabbed, an available movie with no history, Seerr's own FAILED state and a monitored series with no monitored season; one `info` notice, nothing posted on a clean run (docker, curl stubbed) | | fails | blocks | | | | |
 | **Live stack** | | | | | | | |
 | App settings and health through their APIs⁸ | | | | | fails | | |
 | UIs log in and render | | | | | fails | | |
@@ -64,6 +65,7 @@ For each part of the stack: which check covers it, where that check runs, whethe
 | External names answer through the tunnel | warns | | | | | | |
 | NAS drift: `.env.nas.backup`, Kuma monitors, duplicate `.lan` entries | warns | | | | | | |
 | No executables under `/data` | | | | | fails | | cron `scan-executables.sh` |
+| Requests stuck between Seerr, Sonarr/Radarr and the indexers | | | | | | | cron `check-stuck-requests.sh` |
 | Every container healthy | | | | | | | by hand |
 | **Supply chain** | | | | | | | |
 | npm dependency CVEs; secrets and misconfiguration in the tree (trivy, HIGH/CRITICAL) | | | blocks | | | | |

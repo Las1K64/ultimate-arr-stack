@@ -165,6 +165,43 @@ Removed releases are blocklisted so the same broken release won't be grabbed aga
 
 ---
 
+## Stuck Requests
+
+A request can sit undownloaded for weeks while every step reports success. Three naming authorities are involved and nothing checks that a request turned into monitored, findable episodes: Seerr follows TMDB, Sonarr follows TVDB, and release groups name files however they like. The case that prompted this check is in [TROUBLESHOOTING.md](TROUBLESHOOTING.md#seerr-request-stuck-for-weeks-while-the-release-exists-three-naming-authorities). `scripts/check-stuck-requests.sh` reads Seerr's requests, asks Sonarr and Radarr what became of each one, and posts one `info` notice to the Home Assistant panel (tag `stuck-requests`, so each day's notice replaces the last). It changes nothing in any app and posts nothing when nothing is stuck.
+
+```bash
+./scripts/check-stuck-requests.sh            # dry run: report, post nothing
+./scripts/check-stuck-requests.sh --post     # post the notice if anything is stuck
+./scripts/check-stuck-requests.sh --post -v  # also list the requests it judged fine
+./scripts/check-stuck-requests.sh --test     # post a test notice, to prove the webhook
+```
+
+### What it reports
+
+Each line names the title, who requested it, how long ago, and what to do:
+
+- **Seerr never handed it over**, or marked the request *Failed* (usually a VPN blip at the time). Retry it from Seerr → Requests.
+- **Sonarr monitored nothing.** Seerr asked for season numbers the TVDB record doesn't have (Seerr sent "season 10"; TVDB numbers that show's seasons 1964 … 2026), or every requested season is unmonitored. Re-request from the TVDB-linked entry, or monitor the season in Sonarr.
+- **Aired, missing, never grabbed.** An episode aired `STUCK_DAYS` (default 3) or more days ago, has no file, and Sonarr's history holds no grab for it. The indexers probably name the show differently: check a Prowlarr search for the title and push the release to Sonarr under a name it can parse.
+- **Radarr: available, never grabbed.** A monitored, released movie that has been in Radarr for `MOVIE_STUCK_DAYS` (default 7) or more days with no file and no history. Often a TV broadcast with a TMDB *movie* entry, which Radarr can never match: delete it and request the series.
+- **A monitored Sonarr series with no monitored season**, whether or not a request points at it (catches manual adds).
+
+Thresholds come from the environment: `STUCK_DAYS=5 MOVIE_STUCK_DAYS=14 ./scripts/check-stuck-requests.sh`. A film that isn't released yet, and an episode that was grabbed but failed to download, are left to Radarr, Sonarr and the [queue cleanup](#queue-cleanup).
+
+### Automated (cron)
+
+Daily is the point: a request that goes quiet shows up in the panel the day it passes the threshold, not five weeks later. On UGOS the admin user cannot write its own crontab, so install it the same way as the [audiobook mirror](#audiobooks-on-the-tv):
+
+```bash
+crontab -l > /tmp/cron.new
+echo '30 8 * * * $NAS_STACK_DIR/scripts/check-stuck-requests.sh --post >> $NAS_STACK_DIR/logs/check-stuck-requests.log 2>&1' >> /tmp/cron.new
+sudo crontab -u <user> /tmp/cron.new
+```
+
+Prove the webhook once with `--test` and look at the Home Assistant panel: HA answers 200 to any webhook id, so the script's "posted" line only proves the POST arrived. A notice stays in the panel after you fix the requests, until you dismiss it, because nothing is posted on a clean day.
+
+---
+
 ## Executable Scan
 
 Public torrent indexers sometimes serve a Windows executable padded to episode size and named after a real release group. qBittorrent rejects the usual extensions up front and Sonarr/Radarr refuse to import a release containing one — but a refused import leaves the payload in `/data/torrents`, inert on the NAS and one SMB browse away from a machine where it isn't. This reports anything already on disk:
