@@ -447,20 +447,25 @@ Current Pi-hole versions chown files back to `pihole` after each gravity run, so
 2. **A duplicate TMDB TV entry with no TVDB link** and a single "season 10". Seerr sent Sonarr `seasons: [10]`. Sonarr's TVDB record numbers the show's seasons by year (1964 … 2026), so season 10 matched nothing, every season stayed unmonitored, and Seerr logged "Sonarr accepted request".
 3. **Release groups name it `70.Up.S10E01`**, while Sonarr knows the show as *The Up Series* with no scene mapping. Even with a season monitored by hand, Sonarr's own search returned 0.
 
+The commonest cause turned out to be none of these. **Sonarr and Radarr only grab from their RSS sync; neither ever searches the backlog.** A release that RSS missed, because the indexer was in failure backoff that hour or the post fell outside the sync window, is never found until someone clicks Search. Two films sat 130 and 171 days with approved releases on NZBgeek since July; one `MoviesSearch` command grabbed and imported both within 30 seconds.
+
 **Diagnose:** the daily check names each stuck request and what to do; run it by hand with the requests it judged fine included:
 
 ```bash
 ./scripts/check-stuck-requests.sh -v
 ```
 
+For a never-grabbed title it runs the app's own release search and says which case you have: a release it would take (RSS missed it), releases it rejects (with the reasons), nothing while an indexer is in backoff (don't trust the zero), or nothing at all, sorted by a Prowlarr search for the title. Searches are spaced and capped: a burst of fifteen interactive searches put NZBgeek and EZTV into Prowlarr's five-minute backoff and every search in that window returned 0, which reads exactly like "no indexer carries it". `GET /api/v1/indexerstatus` on Prowlarr is empty when no indexer is backed off.
+
 For one request by hand: open the title in Seerr and follow *Manage* to the Sonarr or Radarr entry it points at. In Sonarr, check which seasons are monitored and whether the requested season number exists at all. In Radarr, an empty *History* tab on an "available" movie means it has never found a single release.
 
 **Fix:**
+- *RSS missed it:* `./scripts/check-stuck-requests.sh --apply` queues the search, or click Search on the title in Sonarr or Radarr.
 - *Wrong season numbering:* re-request from the TVDB-linked entry (Seerr's search often lists the show twice; the right entry carries a TVDB id and the full season list), or monitor the right season in Sonarr and search it.
 - *TV broadcast in Radarr:* delete it from Radarr and from Seerr's requests, and request the series instead.
 - *Indexers name it differently:* find the release in Prowlarr and push it to Sonarr, or download it and import it by hand (Sonarr → Wanted → Manual Import).
 
-**Prevention:** `scripts/check-stuck-requests.sh` runs daily from cron and posts a panel notice the day a request passes its threshold (three days for TV, seven for a movie). Setup in [MAINTENANCE.md § Stuck Requests](MAINTENANCE.md#stuck-requests).
+**Prevention:** `scripts/check-stuck-requests.sh --post --apply` runs daily from cron: it posts a panel notice the day a request passes its threshold (three days for TV, seven for a movie) and queues the search for anything RSS missed. Setup in [MAINTENANCE.md § Stuck Requests](MAINTENANCE.md#stuck-requests).
 
 ## Seerr: "/app/config volume mount was not configured properly"
 
