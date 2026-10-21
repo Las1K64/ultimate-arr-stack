@@ -368,14 +368,18 @@ if SONARR_KEY:
             verbose(f"{title}: {len(aired_missing)} missing episode(s), each grabbed at least "
                     f"once (a download problem, not a naming one)")
             continue
-        oldest = never[0][0]
+        oldest_days, oldest_ep = never[0]
+        if oldest_days > 400:   # an old show: the year says more than a day count
+            aired = f"in {parse_date(oldest_ep.get('airDateUtc')).year}"
+        else:
+            aired = f"{plural(oldest_days, 'day')} ago"
         codes = [f"S{e.get('seasonNumber', 0):02d}E{e.get('episodeNumber', 0):02d}" for _, e in never]
         shown = ", ".join(codes[:4]) + (f" and {len(codes) - 4} more" if len(codes) > 4 else "")
         add_finding("Sonarr", title, who, when,
-                    f"{shown} aired {plural(oldest, 'day')} ago and Sonarr has never grabbed "
-                    f"{'it' if len(never) == 1 else 'them'}: the indexers may name this show "
-                    f"differently. Check a Prowlarr search for the title; push the release to "
-                    f"Sonarr under a title it can parse, or add a scene mapping.",
+                    f"{shown} aired {aired} and Sonarr has never grabbed "
+                    f"{'it' if len(never) == 1 else 'them'}: no indexer carries it, or they name "
+                    f"this show differently. Check a Prowlarr search for the title; push the "
+                    f"release to Sonarr under a title it can parse, or add a scene mapping.",
                     key=("Sonarr-never", series["id"], tuple(codes)))
 
     if len(findings) == sonarr_before:

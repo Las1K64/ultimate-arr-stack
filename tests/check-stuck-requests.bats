@@ -229,6 +229,21 @@ PY
     assert_output --partial "The Up Series (no Seerr request"
 }
 
+@test "an old show's missing episodes are dated by year, not by a day count" {
+    python3 - "$FIX/sonarr-episodes-50.json" <<'PY'
+import json, sys
+from datetime import datetime, timedelta, timezone
+eps = json.load(open(sys.argv[1]))
+eps[0]["airDateUtc"] = (datetime.now(timezone.utc) - timedelta(days=9745)).strftime("%Y-%m-%dT%H:%M:%SZ")
+json.dump(eps, open(sys.argv[1], "w"))
+PY
+    year=$(python3 -c 'from datetime import datetime, timedelta, timezone; print((datetime.now(timezone.utc) - timedelta(days=9745)).year)')
+    run "$STACK/scripts/check-stuck-requests.sh"
+    assert_success
+    assert_output --partial "S01E01, S01E02 aired in $year and Sonarr has never grabbed them"
+    refute_output --partial "9745 days"
+}
+
 @test "--post without a webhook fails before any API call" {
     run "$STACK/scripts/check-stuck-requests.sh" --post
     assert_failure
