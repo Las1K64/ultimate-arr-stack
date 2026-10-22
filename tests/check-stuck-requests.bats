@@ -166,6 +166,7 @@ case "$method $url" in
   "GET http://localhost:8989/api/v3/series") serve sonarr-series ;;
   "GET http://localhost:8989/api/v3/episode?seriesId="*) serve "sonarr-episodes-${url##*=}" ;;
   "GET http://localhost:8989/api/v3/history/series?seriesId="*) serve "sonarr-history-${url##*=}" ;;
+  "GET http://localhost:8989/api/v3/episodefile?seriesId="*) serve_or_empty "sonarr-episodefile-${url##*=}" ;;
   "GET http://localhost:8989/api/v3/release?episodeId="*) serve_or_empty "sonarr-release-${url##*=}" ;;
   "GET http://localhost:8989/api/v3/indexer") serve sonarr-indexers ;;
   "GET http://localhost:7878/api/v3/indexer") serve radarr-indexers ;;
@@ -199,6 +200,64 @@ commands() {
 
 indexer_searches() {
     grep -cE '^GET http://localhost:(7878/api/v3/release|8989/api/v3/release|9696/api/v1/search)' "$CURL_LOG" || true
+}
+
+# The October 2026 case, with its real numbers. The UK Queer as Folk (91) had
+# eight season-1 files Sonarr imported on an untagged Queer.as.Folk.S01Exx
+# name: the 2022 reboot's first episode (55:01) and the US run's episodes 2 to
+# 8 (44 to 50 minutes), against TVDB's 32 to 36 for the UK episodes. The US
+# series (89) sits beside it with a file that fits and three the check must
+# leave alone: a two-episode file, one Sonarr has no media info for, and an
+# episode TVDB gives no runtime.
+add_queer_as_folk() {
+    python3 - "$FIX" <<'PY'
+import json, sys
+from datetime import datetime, timedelta, timezone
+fix = sys.argv[1]
+now = datetime.now(timezone.utc)
+def ago(days): return (now - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%SZ")
+def dump(name, obj): json.dump(obj, open(f"{fix}/{name}.json", "w"))
+def season(n, mon): return {"seasonNumber": n, "monitored": mon}
+series = json.load(open(f"{fix}/sonarr-series.json"))
+series += [
+    {"id": 91, "title": "Queer as Folk", "tvdbId": 75625, "monitored": True, "added": ago(14),
+     "seasons": [season(1, True), season(2, True)]},
+    {"id": 89, "title": "Queer as Folk (US)", "tvdbId": 75001, "monitored": True, "added": ago(400),
+     "seasons": [season(1, True), season(2, True)]},
+]
+dump("sonarr-series", series)
+def ep(i, sid, s, e, runtime, file_id=None):
+    return {"id": i, "seriesId": sid, "seasonNumber": s, "episodeNumber": e, "runtime": runtime,
+            "airDateUtc": ago(9800), "hasFile": file_id is not None, "episodeFileId": file_id or 0,
+            "monitored": True}
+def efile(i, sid, s, scene, runtime, media=True):
+    f = {"id": i, "seriesId": sid, "seasonNumber": s, "relativePath": f"Season {s:02d}/{scene}.mkv",
+         "sceneName": scene, "dateAdded": ago(14), "size": 1}
+    if media:
+        f["mediaInfo"] = {"videoCodec": "x264", "runTime": runtime}
+    return f
+uk_tvdb = [32, 33, 35, 36, 33, 33, 32, 35]
+uk_files = ["55:01", "44:10", "45:02", "50:15", "49:11", "48:57", "44:38", "48:39"]
+uk_scene = ["Queer.As.Folk.S01E01.Babylon.1080p.PCOK.WEB-DL.DDP5.1.H.264-iVy"] + \
+           [f"Queer.as.Folk.S01E0{n}.1080p.WEB.H264-DiMEPiECE" for n in range(2, 9)]
+dump("sonarr-episodes-91",
+     [ep(9100 + n, 91, 1, n, uk_tvdb[n - 1], 9100 + n) for n in range(1, 9)] +
+     [ep(9201, 91, 2, 1, 47), ep(9202, 91, 2, 2, 44)])
+dump("sonarr-episodefile-91",
+     [efile(9100 + n, 91, 1, uk_scene[n - 1], uk_files[n - 1]) for n in range(1, 9)])
+dump("sonarr-episodes-89", [
+    ep(8901, 89, 1, 2, 44, 8901),
+    ep(8902, 89, 2, 1, 44, 8902), ep(8903, 89, 2, 2, 44, 8902),   # one file, two episodes
+    ep(8904, 89, 2, 3, 44, 8903),                                  # no media info
+    ep(8905, 89, 2, 4, 0, 8904),                                   # TVDB gives no runtime
+])
+dump("sonarr-episodefile-89", [
+    efile(8901, 89, 1, "Queer.as.Folk.US.S01E02.1080p.AMZN.WEB-DL.DDP2.0.x264-NTb", "44:38"),
+    efile(8902, 89, 2, "Queer.as.Folk.US.S02E01-E02.1080p.AMZN.WEB-DL.DDP2.0.x264-NTb", "1:28:00"),
+    efile(8903, 89, 2, "Queer.as.Folk.US.S02E03.1080p.AMZN.WEB-DL.DDP2.0.x264-NTb", None, media=False),
+    efile(8904, 89, 2, "Queer.as.Folk.US.S02E04.1080p.AMZN.WEB-DL.DDP2.0.x264-NTb", "10:00"),
+])
+PY
 }
 
 @test "a dry run names each stuck request with a diagnosis, and changes nothing" {
@@ -476,6 +535,60 @@ PY
     assert_output --partial "Sonarr has never grabbed them: Sonarr finds 1 release and rejects them all (Quality 480p not wanted in profile). Fix the quality profile or custom formats, or decline the request."
     run grep -c 'EpisodeSearch' "$CURL_LOG"
     assert_output 0
+}
+
+@test "Sonarr: a file far from TVDB's runtime, beside a same-named series, is the wrong show" {
+    add_queer_as_folk
+    run "$STACK/scripts/check-stuck-requests.sh"
+    assert_success
+    assert_output --partial "Thresholds: TV 3 days, movies 7 days, file runtime 40% off TVDB's"
+    assert_output --partial "Queer as Folk (3 wrong files, imported 14 days ago)"
+    assert_output --partial "S01E01 runs 55:01 against TVDB's 32 min (Queer.As.Folk.S01E01.Babylon.1080p.PCOK.WEB-DL.DDP5.1.H.264-iVy); S01E05 runs 49:11 against TVDB's 33 min (Queer.as.Folk.S01E05.1080p.WEB.H264-DiMEPiECE); S01E06 runs 48:57 against TVDB's 33 min (Queer.as.Folk.S01E06.1080p.WEB.H264-DiMEPiECE). Queer as Folk (US) shares the title in Sonarr, so an untagged release of that show was filed here. Delete the files in Sonarr and search again, and check the season's other files: a smaller difference hides the same mistake."
+    # The other five incident files are 29 to 39.6 percent long: under the
+    # default, so the line stops at the three it can stand behind.
+    refute_output --partial "S01E02 runs"
+    refute_output --partial "S01E04 runs"
+    refute_output --partial "S01E08 runs"
+    # The US series has the sibling too, but its files fit or are not
+    # comparable (two episodes in one file, no media info, no TVDB runtime).
+    refute_output --partial "✗ Queer as Folk (US) ("
+    refute_output --partial "1:28:00"
+    assert_output --partial "Summary: 9 stuck requests (4 Radarr, 1 Seerr, 4 Sonarr)"
+    assert_output --partial "• Queer as Folk (Sonarr; 3 wrong files, imported 14 days ago): S01E01 runs 55:01"
+    [ "$(commands)" -eq 0 ]
+    grep -q '^GET http://localhost:8989/api/v3/episodefile?seriesId=91 ' "$CURL_LOG"
+}
+
+@test "Sonarr: the same files with no same-named series are not reported, and -v says so" {
+    add_queer_as_folk
+    python3 - "$FIX/sonarr-series.json" <<'PY'
+import json, sys
+s = [x for x in json.load(open(sys.argv[1])) if x["id"] != 89]
+json.dump(s, open(sys.argv[1], "w"))
+PY
+    run "$STACK/scripts/check-stuck-requests.sh"
+    assert_success
+    refute_output --partial "wrong file"
+    assert_output --partial "- none reported: 8 files in 1 series compared; 1 series (Queer as Folk) off by 40%+ with no same-named series in the library (-v lists them)"
+    assert_output --partial "Summary: 8 stuck requests"
+    run "$STACK/scripts/check-stuck-requests.sh" -v
+    assert_success
+    assert_output --partial "[verbose] Queer as Folk: 3 files 40%+ off TVDB's runtime (S01E01 runs 55:01 against TVDB's 32 min (Queer.As.Folk.S01E01.Babylon.1080p.PCOK.WEB-DL.DDP5.1.H.264-iVy)), but no other series shares the title, so not reported"
+}
+
+@test "Sonarr: RUNTIME_TOLERANCE widens the net; a clean library says so in one line" {
+    add_queer_as_folk
+    RUNTIME_TOLERANCE=30 run "$STACK/scripts/check-stuck-requests.sh"
+    assert_success
+    assert_output --partial "Queer as Folk (7 wrong files, imported 14 days ago)"
+    assert_output --partial "S01E01 runs 55:01 against TVDB's 32 min (Queer.As.Folk.S01E01.Babylon.1080p.PCOK.WEB-DL.DDP5.1.H.264-iVy); S01E02 runs 44:10 against TVDB's 33 min (Queer.as.Folk.S01E02.1080p.WEB.H264-DiMEPiECE); S01E04 runs 50:15 against TVDB's 36 min (Queer.as.Folk.S01E04.1080p.WEB.H264-DiMEPiECE); and 4 more. Queer as Folk (US) shares the title"
+    # S01E03 at 45:02 against 35 min is 29 percent long: still under.
+    refute_output --partial "S01E03 runs"
+    # Without the UK files nothing is off, and the section says what it compared.
+    rm "$FIX/sonarr-episodefile-91.json"
+    run "$STACK/scripts/check-stuck-requests.sh"
+    assert_success
+    assert_output --partial "- none: 1 file in 1 series compared, all within 40% of TVDB's runtime"
 }
 
 @test "--post without a webhook fails before any API call" {
