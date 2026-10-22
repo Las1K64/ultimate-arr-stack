@@ -17,8 +17,15 @@ set -euo pipefail
 # so a release that RSS missed (indexer in backoff that hour, posted outside
 # the window) is never found until somebody clicks Search. Two films sat 130
 # and 171 days that way with approved releases on the indexers the whole time.
-# This check finds that class of silence and posts one notice a day to the
-# Home Assistant panel; with --apply it also queues the search RSS missed.
+# The opposite failure looks like success to every step: in October 2026 the
+# UK Queer as Folk's season 1 was "imported" as the 2022 reboot's first
+# episode and the US run's episodes 2 to 8, because three shows share the
+# plain title, NZBgeek's untagged Queer.as.Folk.S01Exx names belong to the
+# other two, and Sonarr files an untagged name under whichever library series
+# carries the title. Seerr and Jellyfin called it done; only the runtimes (44
+# to 55 minutes against TVDB's 32 to 36) said otherwise. This check finds both
+# classes of silence and posts one notice a day to the Home Assistant panel;
+# with --apply it also queues the search RSS missed.
 #
 # Usage:
 #   ./scripts/check-stuck-requests.sh                 # dry run (default): report only
@@ -27,7 +34,7 @@ set -euo pipefail
 #   ./scripts/check-stuck-requests.sh --post --apply -v
 #   ./scripts/check-stuck-requests.sh --test          # post a test notice, whatever it finds
 #
-#   STUCK_DAYS=3 MOVIE_STUCK_DAYS=7 MAX_SEARCHES=20 SEARCH_PAUSE=3 ./scripts/check-stuck-requests.sh
+#   STUCK_DAYS=3 MOVIE_STUCK_DAYS=7 MAX_SEARCHES=20 SEARCH_PAUSE=3 RUNTIME_TOLERANCE=40 ./scripts/check-stuck-requests.sh
 #
 # Cron (daily, 08:30):
 #   30 8 * * * $NAS_STACK_DIR/scripts/check-stuck-requests.sh --post --apply >> $NAS_STACK_DIR/logs/check-stuck-requests.log 2>&1
@@ -62,6 +69,16 @@ set -euo pipefail
 #     A film still in cinemas with no home release date yet, or a home release
 #     still to come, is waiting correctly and is not reported.
 #   - Any monitored Sonarr series with no monitored season, request or not.
+#   - An imported episode file that cannot be its episode: its length is
+#     RUNTIME_TOLERANCE percent or more off TVDB's runtime for the episode,
+#     and another series in the Sonarr library shares the plain title (the
+#     title with a trailing bracketed country or year removed), which is how
+#     the wrong show gets filed there. One line per series names each file
+#     with its scene name and both runtimes; delete the files and search
+#     again. Without a same-named series the mismatch is shown under -v only:
+#     TVDB's slot lengths and extended episodes are off by that much on their
+#     own. Multi-episode files, files Sonarr has no media info for, and
+#     episodes TVDB gives no runtime are not compared.
 #
 # Every release search hits the indexers for real, so they are spaced
 # SEARCH_PAUSE seconds apart and capped at MAX_SEARCHES a run: a burst of
@@ -94,6 +111,7 @@ STUCK_DAYS="${STUCK_DAYS:-3}"
 MOVIE_STUCK_DAYS="${MOVIE_STUCK_DAYS:-7}"
 MAX_SEARCHES="${MAX_SEARCHES:-20}"
 SEARCH_PAUSE="${SEARCH_PAUSE:-3}"
+RUNTIME_TOLERANCE="${RUNTIME_TOLERANCE:-40}"
 
 # --- Parse arguments ---
 POST=false
@@ -131,7 +149,7 @@ if $APPLY; then
 else
   echo "Searches: reported only (use --apply to queue them)"
 fi
-echo "Thresholds: TV ${STUCK_DAYS} days, movies ${MOVIE_STUCK_DAYS} days"
+echo "Thresholds: TV ${STUCK_DAYS} days, movies ${MOVIE_STUCK_DAYS} days, file runtime ${RUNTIME_TOLERANCE}% off TVDB's"
 echo "========================================"
 
 if $POST && [[ -z "${HA_WEBHOOK_URL:-}" ]]; then
@@ -183,7 +201,8 @@ trap 'rm -f "$NOTICE_FILE"' EXIT
 
 # --- Main check (python3 for JSON processing) ---
 python3 - "$VERBOSE" "$TEST" "$APPLY" "$SEERR_KEY" "$SONARR_KEY" "$RADARR_KEY" "$PROWLARR_KEY" \
-  "$NOTICE_FILE" "$NAS_STACK_DIR" "$STUCK_DAYS" "$MOVIE_STUCK_DAYS" "$MAX_SEARCHES" "$SEARCH_PAUSE" << 'PYEOF'
+  "$NOTICE_FILE" "$NAS_STACK_DIR" "$STUCK_DAYS" "$MOVIE_STUCK_DAYS" "$MAX_SEARCHES" "$SEARCH_PAUSE" \
+  "$RUNTIME_TOLERANCE" << 'PYEOF'
 import json, re, subprocess, sys, time, unicodedata, urllib.parse
 from datetime import datetime, timezone
 
@@ -197,6 +216,7 @@ STUCK_DAYS = int(sys.argv[10])
 MOVIE_STUCK_DAYS = int(sys.argv[11])
 MAX_SEARCHES = int(sys.argv[12])
 SEARCH_PAUSE = float(sys.argv[13])
+RUNTIME_TOLERANCE = float(sys.argv[14])
 
 SEERR = ("http://localhost:5055", SEERR_KEY)
 SONARR = ("http://localhost:8989", SONARR_KEY)
@@ -366,6 +386,31 @@ def norm(s):
 
 TV_SHAPED = re.compile(r"\bs\d{1,2}(e\d{1,3})?\b|\b\d{1,2}x\d{2}\b|\b(19|20)\d{2} \d{2} \d{2}\b")
 
+def plain_title(title):
+    """The title with any trailing bracketed country or year removed, as
+    normalised words: "Queer as Folk", "Queer as Folk (US)" and "Queer as
+    Folk (2022)" are one name here, because an untagged Queer.as.Folk release
+    is filed under whichever of them the library holds."""
+    return norm(re.sub(r"(\s*\((?:[A-Za-z]{2,3}|\d{4})\))+\s*$", "", title or ""))
+
+def runtime_seconds(s):
+    """Seconds from Sonarr's mediaInfo.runTime ("47:59", "1:02:03"); None
+    when it is missing, malformed or zero."""
+    parts = str(s or "").split(":")
+    if not all(p.isdigit() for p in parts):
+        return None
+    secs = 0
+    for p in parts:
+        secs = secs * 60 + int(p)
+    return secs or None
+
+_episodes = {}
+
+def sonarr_episodes(series_id):
+    if series_id not in _episodes:
+        _episodes[series_id] = api_get(SONARR, f"/api/v3/episode?seriesId={series_id}") or []
+    return _episodes[series_id]
+
 def prowlarr_releases(titles):
     """Release names on the enabled indexers that start with one of `titles`,
     or None when Prowlarr can't be asked (no key, failed, or over the cap)."""
@@ -521,7 +566,7 @@ if SONARR_KEY:
                         key=("Sonarr-absent", series["id"], tuple(absent)))
             continue
 
-        episodes = api_get(SONARR, f"/api/v3/episode?seriesId={series['id']}") or []
+        episodes = sonarr_episodes(series["id"])
         scope = [e for e in episodes if not requested or e.get("seasonNumber") in requested]
         monitored = [e for e in scope if e.get("monitored")]
 
@@ -639,6 +684,83 @@ if SONARR_KEY:
                     key=("Sonarr-sweep", s["id"]))
     if swept == 0:
         print("  - none")
+
+    # A file that cannot be its episode. Three shows share the plain title
+    # "Queer as Folk" (UK 1999, US 2000, the 2022 reboot); NZBgeek's untagged
+    # Queer.as.Folk.S01Exx names belong to the US run and the reboot, and
+    # Sonarr files an untagged name under whichever library series carries
+    # the plain title. In October 2026 the UK series' season 1 arrived as the
+    # reboot's first episode (55 min) and the US run's episodes 2 to 8 (44 to
+    # 50 min) against TVDB's 32 to 36, and every step called it done. The
+    # length is the one thing a file can't fake, so compare each one with
+    # TVDB's runtime for its episode. Only a series with a same-named sibling
+    # in the library is reported, since that is the mechanism; the rest is
+    # shown under -v, because TVDB's slot lengths (60 for a 44-minute drama)
+    # and extended finales are off by that much on their own.
+    print("\n--- Sonarr: imported files that cannot be their episode ---")
+    by_plain = {}
+    for s in series_all:
+        by_plain.setdefault(plain_title(s.get("title")), []).append(s)
+    files_compared = series_compared = 0
+    quiet = []   # series off by enough, with no same-named sibling: not reported
+    wrong_before = len(findings)
+    for s in series_all:
+        if not s.get("monitored"):
+            continue
+        files = api_get(SONARR, f"/api/v3/episodefile?seriesId={s['id']}") or []
+        if not files:
+            continue
+        series_compared += 1
+        eps_by_file = {}
+        for e in sonarr_episodes(s["id"]):
+            if e.get("episodeFileId"):
+                eps_by_file.setdefault(e["episodeFileId"], []).append(e)
+        wrong = []
+        for f in files:
+            eps = eps_by_file.get(f.get("id")) or []
+            if len(eps) != 1:
+                continue   # a multi-episode file, or one no episode maps to
+            tvdb_min = eps[0].get("runtime") or 0
+            have = runtime_seconds((f.get("mediaInfo") or {}).get("runTime"))
+            if tvdb_min <= 0 or have is None:
+                continue
+            files_compared += 1
+            if abs(have - tvdb_min * 60) * 100 >= RUNTIME_TOLERANCE * tvdb_min * 60:
+                wrong.append((eps[0], f))
+        if not wrong:
+            continue
+        title = s.get("title", "?")
+        wrong.sort(key=lambda t: (t[0].get("seasonNumber", 0), t[0].get("episodeNumber", 0)))
+        def describe(e, f):
+            scene = (f.get("sceneName") or f.get("relativePath") or "?")[:70]
+            return (f"S{e.get('seasonNumber', 0):02d}E{e.get('episodeNumber', 0):02d} runs "
+                    f"{f['mediaInfo']['runTime']} against TVDB's {e['runtime']} min ({scene})")
+        siblings = [o.get("title", "?") for o in by_plain[plain_title(title)] if o["id"] != s["id"]]
+        if not siblings:
+            quiet.append(title)
+            verbose(f"{title}: {plural(len(wrong), 'file')} {RUNTIME_TOLERANCE:g}%+ off TVDB's "
+                    f"runtime ({describe(*wrong[0])}), but no other series shares the title, "
+                    f"so not reported")
+            continue
+        shown = "; ".join(describe(e, f) for e, f in wrong[:3])
+        if len(wrong) > 3:
+            shown += f"; and {len(wrong) - 3} more"
+        share = "shares" if len(siblings) == 1 else "share"
+        newest = max((f.get("dateAdded") or "" for _, f in wrong), default="")
+        add_finding("Sonarr", title, plural(len(wrong), "wrong file"), ago(days_since(newest), "imported"),
+                    f"{shown}. {', '.join(siblings)} {share} the title in Sonarr, so an untagged "
+                    f"release of that show was filed here. Delete the files in Sonarr and search "
+                    f"again, and check the season's other files: a smaller difference hides the "
+                    f"same mistake.",
+                    key=("Sonarr-wrongfile", s["id"]))
+    if len(findings) == wrong_before:
+        what = f"{plural(files_compared, 'file')} in {series_compared} series compared"
+        if quiet:
+            print(f"  - none reported: {what}; {len(quiet)} series "
+                  f"({', '.join(quiet[:3])}{', …' if len(quiet) > 3 else ''}) off by "
+                  f"{RUNTIME_TOLERANCE:g}%+ with no same-named series in the library (-v lists them)")
+        else:
+            print(f"  - none: {what}, all within {RUNTIME_TOLERANCE:g}% of TVDB's runtime")
 elif tv_candidates:
     print("\n--- Sonarr ---")
     print(f"  ✗ No Sonarr API key; {len(tv_candidates)} TV request(s) not checked")

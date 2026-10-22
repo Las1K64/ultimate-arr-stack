@@ -1,6 +1,6 @@
 # Home Assistant Integration
 
-Every notification from the stack goes to Home Assistant through **one automation on one webhook**: Sonarr and Radarr, Uptime Kuma, Beszel, the nightly backup's failure alert, the weekly queue-cleanup report and the daily stuck-request check. Each notice says what happened and what, if anything, to do ("Ready to watch: …", "Needs manual import: … Open Radarr → Activity → Queue and import it").
+Every notification from the stack goes to Home Assistant through **one automation on one webhook**: Sonarr and Radarr, Uptime Kuma, Beszel, the nightly backup's failure alert, the weekly queue-cleanup report and the daily stuck-request check (which also names an imported episode file whose length says it is another show). Each notice says what happened and what, if anything, to do ("Ready to watch: …", "Needs manual import: … Open Radarr → Activity → Queue and import it").
 
 ## Prerequisites
 
