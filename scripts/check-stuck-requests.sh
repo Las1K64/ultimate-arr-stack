@@ -754,9 +754,9 @@ if SONARR_KEY:
                     f"same mistake.",
                     key=("Sonarr-wrongfile", s["id"]))
     if len(findings) == wrong_before:
-        what = f"{plural(files_compared, 'file')} in {plural(series_compared, 'series')} compared"
+        what = f"{plural(files_compared, 'file')} in {series_compared} series compared"
         if quiet:
-            print(f"  - none reported: {what}; {plural(len(quiet), 'series')} "
+            print(f"  - none reported: {what}; {len(quiet)} series "
                   f"({', '.join(quiet[:3])}{', …' if len(quiet) > 3 else ''}) off by "
                   f"{RUNTIME_TOLERANCE:g}%+ with no same-named series in the library (-v lists them)")
         else:
