@@ -40,6 +40,37 @@ docker compose -f docker-compose.arr-stack.yml up -d  # Restarts containers with
 
 When upgrading across versions, check below for any action required.
 
+### v1.17.0 → v1.18.0
+
+Eight image bumps. Pi-hole's gravity database migration is one-way and qBittorrent rewrites its config file to a newer layout, so back up those two volumes first, with the services stopped. Jellyfin 12.3 runs no migration; back it up only if you want to, and know that `jellyfin-config` is about 4 GB (almost all `metadata/`), so a gzip takes around 12 minutes on a NAS CPU with Jellyfin down. Use `tar cf` or `--exclude=./metadata`. Check that nothing is playing or downloading first: recreating Pi-hole takes every `.lan` name and LAN DNS down for about 35 seconds, and stopping qBittorrent pauses its downloads.
+
+Pass only the services you mean, each through its own compose file, and never `--remove-orphans`:
+
+```bash
+cd $NAS_STACK_DIR && git pull
+docker compose -f docker-compose.arr-stack.yml pull pihole qbittorrent jellyfin dnscrypt-proxy
+docker compose -f docker-compose.arr-stack.yml stop pihole qbittorrent
+mkdir -p backups
+for v in pihole-etc-pihole qbittorrent-config; do
+  docker run --rm -v arr-stack_$v:/src:ro -v "$PWD/backups":/bak alpine tar cf /bak/$v-$(date +%Y%m%d).tar -C /src .
+done
+docker compose -f docker-compose.arr-stack.yml up -d --no-deps pihole qbittorrent jellyfin dnscrypt-proxy
+
+docker compose -f docker-compose.cloudflared.yml pull cloudflared
+docker compose -f docker-compose.cloudflared.yml up -d --no-deps cloudflared
+docker compose -f docker-compose.tailscale.yml pull tailscale
+docker compose -f docker-compose.tailscale.yml up -d tailscale
+docker compose -f docker-compose.utilities.yml pull uptime-kuma
+docker compose -f docker-compose.utilities.yml up -d --no-deps uptime-kuma
+```
+
+configarr is opt-in and is pulled the next time you run it. Afterwards:
+
+- **Pi-hole:** `http://pihole.lan/` now answers 404. Use `http://pihole.lan/admin/`, and point any monitor or bookmark of your own at `/admin/` too. Pi-hole's own 17 fixes are in; nothing to configure. Over the first night it deletes queries older than `database.maxDBdays` (91), which may take a while on a large `pihole-FTL.db`.
+- **qBittorrent:** settings carry over (port, server domains, auth whitelist, categories, VueTorrent). If you sit it behind a reverse proxy that sets `X-Forwarded-For`, 5.3.0 stops trusting that header for authentication, which is the point of the fix.
+- **Jellyfin:** wait for `Startup complete` in `docker logs jellyfin`. A script of your own that authenticates with `X-Emby-Token` gets 401 from Jellyfin 12; send `Authorization: MediaBrowser Token="<key>"` instead.
+- **Tailscale, cloudflared, Uptime Kuma, dnscrypt-proxy:** nothing to do.
+
 ### v1.16.1 → v1.17.0
 
 One image bump. Seerr's release is security-only with no database migration, so `git pull`, then recreate it through its own compose file:
