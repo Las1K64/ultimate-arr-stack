@@ -40,6 +40,24 @@ docker compose -f docker-compose.arr-stack.yml up -d  # Restarts containers with
 
 When upgrading across versions, check below for any action required.
 
+### v1.16.1 → v1.17.0
+
+One image bump. Seerr's release is security-only with no database migration, so `git pull`, then recreate it through its own compose file:
+
+```bash
+cd $NAS_STACK_DIR && git pull
+docker compose -f docker-compose.arr-stack.yml pull seerr
+docker compose -f docker-compose.arr-stack.yml up -d --no-deps seerr   # v3.5.1
+```
+
+On a NAS CPU, Seerr takes a few minutes from container start to `Server ready on port 5055` in `docker logs seerr`, and its page answers nothing until then. The healthcheck allows for it; don't recreate it again.
+
+Nothing else in this release touches a running container.
+
+- **The daily stuck-request check** is new and optional. It posts through `HA_WEBHOOK_URL` in `.env` (set up in v1.16.0). Prove the webhook with `./scripts/check-stuck-requests.sh --test` and look for the notice in the Home Assistant panel, run it once by hand with `-v` to see what it would report, then add the cron line from [MAINTENANCE.md § Stuck Requests](MAINTENANCE.md#stuck-requests). Only `--apply` changes anything in an app: it queues a Sonarr or Radarr search for a release RSS missed.
+- **Uptime Kuma:** if you set up Kuma's notification from the earlier steps and alerts arrive twice, delete the older notification ([HOME-ASSISTANT.md](HOME-ASSISTANT.md)).
+- **e2e tests on your dev machine:** `npm ci` picks up dotenv 18.
+
 ### v1.16.0 → v1.16.1
 
 DIUN is removed. `git pull`, then delete what an earlier version left behind. Compose no longer knows the service, so remove it by name:
