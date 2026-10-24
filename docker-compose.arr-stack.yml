@@ -199,7 +199,7 @@ services:
       # (their own static IPs) and publish their own ports — see those services.
       - "9696:9696"   # Prowlarr
       - "8085:8085"   # qBittorrent
-      - "8082:8080"   # SABnzbd
+      - "8080:8080"   # SABnzbd
       - "8191:8191"   # FlareSolverr
     networks:
       arr-stack:
@@ -219,7 +219,7 @@ services:
   # Access: qbit.lan | qbit.yourdomain.com | NAS_IP:8085
   # ═══════════════════════════════════════════════════════════════════════════
   qbittorrent:
-    image: lscr.io/linuxserver/qbittorrent:5.3.0
+    image: lscr.io/linuxserver/qbittorrent:5.2.4
     container_name: qbittorrent
     <<: *lsio-security
     network_mode: "service:gluetun"
@@ -254,7 +254,7 @@ services:
 
   # ═══════════════════════════════════════════════════════════════════════════
   # SABNZBD - Usenet download client. Downloads via VPN for extra security.
-  # Access: sabnzbd.lan | sabnzbd.yourdomain.com | NAS_IP:8082
+  # Access: sabnzbd.lan | sabnzbd.yourdomain.com | NAS_IP:8080
   # ═══════════════════════════════════════════════════════════════════════════
   sabnzbd:
     image: lscr.io/linuxserver/sabnzbd:5.1.3
@@ -390,7 +390,7 @@ services:
   # Access: jellyfin.lan | jellyfin.yourdomain.com | NAS_IP:8096
   # ═══════════════════════════════════════════════════════════════════════════
   jellyfin:
-    image: jellyfin/jellyfin:12.3
+    image: jellyfin/jellyfin:12.2
     container_name: jellyfin
     <<: *default-security
     cap_add:
@@ -432,7 +432,7 @@ services:
   # Protocols: DoH (DNS over HTTPS), DNSCrypt, Anonymized DNS
   # ═══════════════════════════════════════════════════════════════════════════
   dnscrypt-proxy:
-    image: klutchell/dnscrypt-proxy:2.1.20
+    image: klutchell/dnscrypt-proxy:2.1.18
     container_name: dnscrypt-proxy
     cap_drop:
       - ALL
@@ -461,7 +461,7 @@ services:
   # Configure upstream DNS: Settings → DNS → Custom = 172.20.0.6#5053
   # ═══════════════════════════════════════════════════════════════════════════
   pihole:
-    image: pihole/pihole:2026.10.0
+    image: pihole/pihole:2026.09.0
     container_name: pihole
     depends_on:
       dnscrypt-proxy:
@@ -508,7 +508,7 @@ services:
   # Access: seerr.lan | seerr.yourdomain.com | NAS_IP:5055
   # ═══════════════════════════════════════════════════════════════════════════
   seerr:
-    image: ghcr.io/seerr-team/seerr:v3.5.1
+    image: ghcr.io/seerr-team/seerr:v3.5.0
     init: true
     container_name: seerr
     # No cap_add: the image runs as node (UID 1000), and a non-root process
