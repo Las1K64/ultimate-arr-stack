@@ -1,0 +1,175 @@
+# =============================================================================
+# ENVIRONMENT CONFIGURATION
+# =============================================================================
+# Organized by setup level. Fill in sections for your chosen setup:
+#   - Core: VPN-protected downloads + Jellyfin (required)
+#   - + local DNS: Adds .lan domains and ad-blocking (optional)
+#   - + remote access: Adds external access from anywhere (optional)
+# =============================================================================
+
+# =============================================================================
+# CORE (required for all setups)
+# =============================================================================
+
+# Media storage root path - adjust for YOUR NAS/server
+# Examples:
+#   /volume1/data      (Ugreen, Synology)
+#   /share/data        (QNAP)
+#   /srv/data          (Linux server)
+# Stack directory - where this repo lives on the NAS
+# Used by scripts for paths to compose files, configs, and logs
+# Examples:
+#   /volume1/docker/arr-stack   (Ugreen/Synology volume 1)
+#   /volume2/docker/arr-stack   (Ugreen/Synology volume 2)
+#   /share/docker/arr-stack     (QNAP)
+#   /srv/docker/arr-stack       (Linux server)
+NAS_STACK_DIR=/volume1/docker/arr-stack
+
+# Media storage root path - adjust for YOUR NAS/server
+# Examples:
+#   /volume1/data      (Ugreen, Synology)
+#   /share/data        (QNAP)
+#   /srv/data          (Linux server)
+MEDIA_ROOT=/volume1/data
+
+# Timezone - used for correct scheduling, logs, and UI times across all services
+# Find yours at: https://en.wikipedia.org/wiki/List_of_tz_database_time_zones
+# Examples: America/New_York, America/Los_Angeles, Europe/Paris, Australia/Sydney
+TZ=America/Chicago
+
+# User/Group IDs (usually 1000/1000, check with: id -u && id -g)
+PUID=1000
+PGID=1000
+
+# Hardware Transcoding (Intel Quick Sync) - optional
+# Enables GPU-accelerated video transcoding in Jellyfin (much lower CPU usage)
+# Find your render group ID: getent group render | cut -d: -f3
+# Leave unset or 0 to skip hardware transcoding
+RENDER_GROUP_ID=105
+
+# VPN Configuration
+# Gluetun supports 30+ providers: https://github.com/qdm12/gluetun-wiki/tree/main/setup/providers
+# Common providers: surfshark, nordvpn, private internet access, mullvad, protonvpn
+VPN_SERVICE_PROVIDER=protonvpn
+
+# VPN Type (wireguard or openvpn)
+VPN_TYPE=wireguard
+
+# VPN Credentials - varies by provider, see Gluetun wiki for your provider
+# Example for Surfshark/WireGuard:
+#   Get from: https://my.surfshark.com/ → VPN → Manual Setup → Router → WireGuard
+#   Download the .conf file and extract PrivateKey and Address from [Interface] section
+WIREGUARD_PRIVATE_KEY=EMxfBRHzd+vYa9J3/tySXRB0B12f17fFLH4sWD9P83s=
+WIREGUARD_ADDRESSES=10.14.0.2/16
+
+# Example for OpenVPN-based providers (NordVPN, PIA, etc.):
+# OPENVPN_USER=your_username
+# OPENVPN_PASSWORD=your_password
+
+# VPN Server Location
+# Pick based on your needs:
+#   - Closest to you = fastest speeds
+#   - Specific country = access region-locked content (e.g., US for US Netflix)
+# Examples: United Kingdom, United States, Netherlands, Switzerland
+# NOTE: Some countries legally block public indexers at the Cloudflare/ISP level
+#   (e.g. the UK returns HTTP 451 for EZTV and similar). If new releases never
+#   grab and Prowlarr disables an indexer for "failures", switch to a non-blocking
+#   country here. See docs/TROUBLESHOOTING.md "New Releases Never Grab".
+VPN_COUNTRIES=United States
+
+# =============================================================================
+# + LOCAL DNS (optional - adds .lan domains and ad-blocking)
+# =============================================================================
+# Enables access like http://sonarr.lan instead of http://192.168.1.50:8989
+# Skip this section for Core setup (IP:port access only)
+
+# Your NAS IP address (used for Pi-hole DNS binding)
+# IMPORTANT: This must be a static IP set in your NAS network settings, not just a DHCP
+# reservation on your router. A DHCP reservation gives you the same IP every time, but the
+# NAS still asks for it at boot — Docker starts before that handshake finishes, and Pi-hole
+# fails to bind (exit 128) on every reboot.
+#
+# To check:  ip addr show eth0  — if you see "dynamic", it's DHCP.
+# To fix:    Edit /etc/network/interfaces.d/ifcfg-eth0 and change "iface eth0 inet dhcp"
+#            to "iface eth0 inet static" with address/netmask/gateway lines, then reboot.
+#            See docs/TROUBLESHOOTING.md for full steps.
+# Also keep: a DHCP reservation on your router for this IP, so no other device gets it.
+#
+# Find your current IP with: hostname -I | awk '{print $1}'
+NAS_IP=192.168.1.97
+
+# Pi-hole Admin Password
+PIHOLE_UI_PASS=Axbk57bb4!
+
+# Traefik's LAN IP and MAC (via macvlan network)
+# This gives Traefik its own IP on your network where it can use port 80
+# Choose an unused IP in your LAN range, then add a DHCP reservation in your router
+TRAEFIK_LAN_IP=192.168.1.11
+
+# Fixed MAC address for DHCP reservation (can be any valid locally-administered MAC)
+# Format: x2:xx:xx:xx:xx:xx where first octet's second nibble is 2,6,A,E (local bit set)
+TRAEFIK_LAN_MAC=02:42:c0:a8:01:0b
+
+# Network interface name on the NAS (check with: ip link show)
+# Common values: eth0, bond0, enp0s3
+LAN_INTERFACE=eth0
+
+# Your LAN subnet and gateway
+# Example: If your router is 192.168.1.1 and devices are 192.168.1.x:
+#   LAN_SUBNET=192.168.1.0/24
+#   LAN_GATEWAY=192.168.1.1
+LAN_SUBNET=192.168.1.0/24
+LAN_GATEWAY=192.168.1.1
+
+# =============================================================================
+# + REMOTE ACCESS (optional - adds external access from anywhere)
+# =============================================================================
+# Enables access like https://jellyfin.yourdomain.com from outside your home
+# Skip this section if you only need local access
+
+# Domain Configuration
+# Buy your own domain (~$10/year). Cloudflare Registrar is simplest: https://www.cloudflare.com/products/registrar/
+DOMAIN=yourdomain.com
+
+# Traefik Dashboard Authentication
+# Generate with: htpasswd -nbB admin 'YOUR_PASSWORD'
+# IMPORTANT: Must be quoted (contains $ which Docker interprets as variables)
+TRAEFIK_DASHBOARD_AUTH='admin:$2y$05$Qi8hG9s7wrerL/iPJaiBXezVs.dJ9xj1vbW8YAEmfgON8KCIy6bK2'
+
+# Tailscale (optional - reach the whole LAN remotely, including CGNAT/hotel WiFi)
+# See docs/TAILSCALE.md for the full walkthrough. Only needed if you deploy
+# docker-compose.tailscale.yml.
+
+# Tailscale node hostname as it appears in the admin console
+# TS_HOSTNAME=arr-stack-nas
+
+# Pre-auth key for unattended setup (https://login.tailscale.com/admin/settings/keys)
+# Leave unset for interactive first-run auth — recommended for personal use
+# TS_AUTHKEY=tskey-auth-xxxxxxxxxxxx
+
+# Additional subnets to advertise beyond LAN_SUBNET (comma-separated, no spaces)
+# Example: also advertise the Docker arr-stack subnet for raw container access
+# TS_EXTRA_ROUTES=172.20.0.0/24
+
+# =============================================================================
+# UTILITIES (optional)
+# =============================================================================
+
+# Plex (if you swap Jellyfin for Plex — see the "Want to use Plex?" section in docs/SETUP.md)
+# Get claim token from: https://plex.tv/claim (expires in 4 minutes!)
+# Only needed on first run to link server to your Plex account
+# PLEX_CLAIM=claim-xxxxxxxxxxxxxxxxxxxx
+
+
+# Beszel agent key (for beszel-agent in utilities.yml)
+# Get from Beszel hub UI: Add System → copy KEY value
+# BESZEL_KEY=
+
+# Home Assistant webhook for the backup's failure alert and the weekly queue-cleanup
+# report: the one-automation webhook in docs/HOME-ASSISTANT.md
+# HA_WEBHOOK_URL=http://192.168.1.20:8123/api/webhook/arr-stack-notify-CHANGE-ME
+
+# Configarr - TRaSH Guides quality profile sync (for configarr in utilities.yml)
+# Get API keys from: Sonarr/Radarr → Settings → General → API Key
+# SONARR_API_KEY=
+# RADARR_API_KEY=
